@@ -57,6 +57,16 @@ kubeadm_ansible/
 - Template VM with ID 9999 (Debian-based)
 - Hostnames resolvable: `kube50[1-3].home`, `kube51[1-3].home`
 
+## Critical Configuration Requirements
+
+**Cgroup Driver:**
+Kubernetes (kubelet) and the container runtime (containerd) **must** use the same cgroup driver. This project configures both to use `systemd`.
+
+- **Containerd:** `SystemdCgroup = true` in `/etc/containerd/config.toml`
+- **Kubelet:** `cgroupDriver: systemd` in `/var/lib/kubelet/config.yaml`
+
+*Note: Mismatched cgroup drivers will cause the kubelet to fail startup and the node will not become Ready.*
+
 ## Quick Start
 
 1. **Setup direnv and vault:**
