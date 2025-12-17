@@ -1,0 +1,192 @@
+---
+- name: Health Check - VM Connectivity
+  hosts: k8s
+  gather_facts: true
+  tags: [health, vm]
+  tasks:
+    - name: Verify SSH connectivity
+      ansible.builtin.ping:
+
+    - name: Check disk space
+      ansible.builtin.shell: df -h / | tail -1 | awk '{print $5}' | tr -d '%'
+      register: disk_usage
+      changed_when: false
+
+    - name: Warn on low disk space
+      ansible.builtin.debug:
+        msg: "WARNING: Disk usage at {{ disk_usage.stdout }}%"
+      when: disk_usage.stdout | int > 80
+
+    - name: Check memory usage
+      ansible.builtin.shell: free -m | awk '/Mem:/ {printf "%.0f", $3/$2 * 100}'
+      register: mem_usage
+      changed_when: false
+
+    - name: Report memory usage
+      ansible.builtin.debug:
+        msg: "Memory usage: {{ mem_usage.stdout }}%"
+
+- name: Health Check - Container Runtime
+  hosts: k8s
+  become: true
+  gather_facts: false
+  tags: [health, containerd]
+  tasks:
+    - name: Check containerd service
+      ansible.builtin.systemd:
+        name: containerd
+        state: started
+      check_mode: true
+      register: containerd_status
+
+    - name: Report containerd status
+      ansible.builtin.debug:
+        msg: "containerd: {{ 'running' if containerd_status.status.ActiveState == 'active' else 'NOT RUNNING' }}"
+
+- name: Health Check - Kubelet Service
+  hosts: k8s
+  become: true
+  gather_facts: false
+  tags: [health, kubelet]
+  tasks:
+    - name: Check kubelet service
+      ansible.builtin.systemd:
+        name: kubelet
+        state: started
+      check_mode: true
+      register: kubelet_status
+
+    - name: Report kubelet status
+      ansible.builtin.debug:
+        msg: "kubelet: {{ 'running' if kubelet_status.status.ActiveState == 'active' else 'NOT RUNNING' }}"
+
+- name: Health Check - HAProxy and Keepalived
+  hosts: k8s_controller
+  become: true
+  gather_facts: false
+  tags: [health, ha]
+  tasks:
+    - name: Check haproxy service
+      ansible.builtin.systemd:
+        name: haproxy
+        state: started
+      check_mode: true
+      register: haproxy_status
+      failed_when: false
+
+    - name: Check keepalived service
+      ansible.builtin.systemd:
+        name: keepalived
+        state: started
+      check_mode: true
+      register: keepalived_status
+      failed_when: false
+
+    - name: Report HA services status
+      ansible.builtin.debug:
+        msg: >-
+          haproxy: {{ 'running' if haproxy_status.status.ActiveState | default('inactive') == 'active' else 'NOT RUNNING' }},
+          keepalived: {{ 'running' if keepalived_status.status.ActiveState | default('inactive') == 'active' else 'NOT RUNNING' }}
+
+- name: Health Check - Kubernetes API
+  hosts: master
+  become: true
+  gather_facts: false
+  tags: [health, api]
+  tasks:
+    - name: Check API server health
+      ansible.builtin.uri:
+        url: https://localhost:6443/healthz
+        validate_certs: false
+        return_content: true
+      register: api_health
+      failed_when: false
+
+    - name: Report API server status
+      ansible.builtin.debug:
+        msg: "API Server: {{ api_health.content | default('UNREACHABLE') }}"
+
+    - name: Check etcd health
+      ansible.builtin.uri:
+        url: https://localhost:2379/health
+        validate_certs: false
+        client_cert: /etc/kubernetes/pki/etcd/peer.crt
+        client_key: /etc/kubernetes/pki/etcd/peer.key
+        return_content: true
+      register: etcd_health
+      failed_when: false
+
+    - name: Report etcd status
+      ansible.builtin.debug:
+        msg: "etcd: {{ etcd_health.json.health | default('UNREACHABLE') }}"
+
+- name: Health Check - Node Readiness
+  hosts: master
+  become: false
+  gather_facts: false
+  tags: [health, nodes]
+  tasks:
+    - name: Get node status
+      ansible.builtin.command: kubectl get nodes -o wide --no-headers
+      register: node_status
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/{{ ansible_user }}/.kube/config
+
+    - name: Display node status
+      ansible.builtin.debug:
+        msg: "{{ node_status.stdout_lines }}"
+
+    - name: Check for NotReady nodes
+      ansible.builtin.command: kubectl get nodes -o jsonpath='{.items[?(@.status.conditions[-1].type=="Ready")].status.conditions[-1].status}'
+      register: ready_status
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/{{ ansible_user }}/.kube/config
+
+    - name: Count ready nodes
+      ansible.builtin.shell: kubectl get nodes --no-headers | wc -l
+      register: total_nodes
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/{{ ansible_user }}/.kube/config
+
+    - name: Count ready nodes
+      ansible.builtin.shell: kubectl get nodes --no-headers | grep -c ' Ready' || true
+      register: ready_nodes
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/{{ ansible_user }}/.kube/config
+
+    - name: Report node readiness
+      ansible.builtin.debug:
+        msg: "Nodes Ready: {{ ready_nodes.stdout }}/{{ total_nodes.stdout }}"
+
+- name: Health Check - Core Components
+  hosts: master
+  become: false
+  gather_facts: false
+  tags: [health, components]
+  tasks:
+    - name: Check kube-system pods
+      ansible.builtin.command: kubectl get pods -n kube-system -o wide --no-headers
+      register: system_pods
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/{{ ansible_user }}/.kube/config
+
+    - name: Display kube-system pods
+      ansible.builtin.debug:
+        msg: "{{ system_pods.stdout_lines }}"
+
+    - name: Check for non-running pods in kube-system
+      ansible.builtin.shell: kubectl get pods -n kube-system --no-headers | grep -v Running | grep -v Completed || echo "All pods running"
+      register: problem_pods
+      changed_when: false
+      environment:
+        KUBECONFIG: /home/{{ ansible_user }}/.kube/config
+
+    - name: Report problem pods
+      ansible.builtin.debug:
+        msg: "{{ problem_pods.stdout_lines }}"
+      when: problem_pods.stdout != "All pods running"

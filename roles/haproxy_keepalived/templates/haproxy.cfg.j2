@@ -1,0 +1,52 @@
+# /etc/haproxy/haproxy.cfg
+#---------------------------------------------------------------------
+# Global settings
+#---------------------------------------------------------------------
+global
+    log stdout format raw local0
+    daemon
+
+#---------------------------------------------------------------------
+# common defaults that all the 'listen' and 'backend' sections will
+# use if not designated in their block
+#---------------------------------------------------------------------
+defaults
+    mode                    tcp
+    log                     global
+    option                  tcplog
+    option                  dontlognull
+    option                  redispatch
+    retries                 3
+    timeout connect         10s
+    timeout client          60s
+    timeout server          60s
+    timeout check           10s
+
+#---------------------------------------------------------------------
+# apiserver frontend which proxys to the control plane nodes
+#---------------------------------------------------------------------
+frontend apiserver
+    bind {{ vip }}:6443
+    mode tcp
+    option tcplog
+    default_backend apiserver-backend
+    tcp-request inspect-delay 5s
+    tcp-request content accept if { req.ssl_hello_type 1 }
+
+#---------------------------------------------------------------------
+# round robin balancing for apiserver
+#---------------------------------------------------------------------
+backend apiserver-backend
+    option httpchk
+    http-check connect ssl
+    http-check send meth GET uri /healthz
+    http-check expect status 200
+    balance roundrobin
+    default-server inter 2s fall 3 rise 2
+    {% for host in groups['k8s_controller'] %}
+{% if not haproxy_all_backends | default(false) and host != groups['k8s_controller'][0] %}
+    server {{ host }} {{ hostvars[host]['ansible_default_ipv4']['address'] }}:6443 check verify none disabled
+{% else %}
+    server {{ host }} {{ hostvars[host]['ansible_default_ipv4']['address'] }}:6443 check verify none
+{% endif %}
+    {% endfor %}

@@ -1,0 +1,60 @@
+---
+- name: Reset Kubernetes cluster
+  hosts: k8s
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Stop containers
+      shell: crictl stopp $(crictl ps -a -q) || true
+      ignore_errors: true
+
+    - name: Remove containers
+      shell: crictl rmp $(crictl ps -a -q) || true
+      ignore_errors: true
+
+    - name: Kill container processes
+      shell: kill -9 $(pgrep container*) || true
+      ignore_errors: true
+
+    - name: Kill kube processes
+      shell: kill -9 $(pgrep kube*) || true
+      ignore_errors: true
+
+    - name: Stop kubelet and containerd
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+      loop:
+        - kubelet
+        - containerd
+      ignore_errors: true
+
+    - name: Delete flannel interface
+      command: ip link delete flannel.1
+      ignore_errors: true
+
+    - name: Unmount kubelet volumes and etcd
+      shell: |
+        umount $(grep '/var/lib/kubelet' /proc/mounts | awk '{print $2}' | sort -r) 2>/dev/null || true
+        umount /var/lib/etcd 2>/dev/null || true
+      ignore_errors: true
+
+    - name: Remove Kubernetes directories
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/cni/net.d
+        - /var/lib/cni
+        - /var/lib/etcd
+        - /var/lib/kubelet
+        - /etc/kubernetes
+        - /var/lib/containerd
+
+    - name: Reset kubeadm
+      command: kubeadm reset --force
+      ignore_errors: true
+
+    - name: Clear IPVS rules
+      command: ipvsadm --clear
+      ignore_errors: true

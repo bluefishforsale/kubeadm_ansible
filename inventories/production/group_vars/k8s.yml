@@ -1,0 +1,4 @@
+---
+# Variables specific to all Kubernetes nodes
+kubernetes_version: "1.32.10-1.1"
+sandbox_image: "registry.k8s.io/pause:3.10"

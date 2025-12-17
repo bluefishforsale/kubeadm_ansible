@@ -2,6 +2,39 @@
 
 Ansible automation to deploy a highly-available Kubernetes cluster using kubeadm, HAProxy, Keepalived, and Flannel CNI on Proxmox VMs.
 
+## Project Structure
+
+```
+kubeadm_ansible/
+├── ansible.cfg
+├── site.yml                          # Master playbook
+├── group_vars/
+│   └── all/
+│       └── vault.yml                 # Encrypted secrets
+├── inventories/
+│   └── production/
+│       ├── hosts.ini
+│       └── group_vars/
+│           ├── all.yml
+│           ├── k8s.yml
+│           ├── k8s_controller.yml
+│           └── k8s_worker.yml
+├── playbooks/
+│   ├── create_vms.yml
+│   ├── setup_cluster.yml
+│   └── reset_cluster.yml
+└── roles/
+    ├── proxmox_vm/
+    ├── kubernetes_repo/
+    ├── kubernetes_install/
+    ├── containerd/
+    ├── haproxy_keepalived/
+    ├── kubeadm_init/
+    ├── kubeadm_join/
+    ├── nvidia_gpu/
+    └── metrics_server/
+```
+
 ## Infrastructure Created
 
 **VMs:** Creates Debian-based VMs on Proxmox (cloned from template ID 9999)
@@ -19,18 +52,9 @@ Ansible automation to deploy a highly-available Kubernetes cluster using kubeadm
 
 ## Requirements
 
-**Control machine:**
-
 - Ansible 2.9+
 - SSH access to Proxmox host
-
-**Proxmox:**
-
 - Template VM with ID 9999 (Debian-based)
-- SSH keys at `https://github.com/bluefishforsale.keys`
-
-**DNS:**
-
 - Hostnames resolvable: `kube50[1-3].home`, `kube51[1-3].home`
 
 ## Quick Start
@@ -38,70 +62,56 @@ Ansible automation to deploy a highly-available Kubernetes cluster using kubeadm
 1. **Setup direnv and vault:**
 
 ```bash
-# Allow direnv to load environment variables
 direnv allow .
 
-# Edit vault_secrets.yaml with your variables (currently unencrypted)
-# Then encrypt it:
-ansible-vault encrypt vault_secrets.yaml
+# Edit vault (group_vars/all/vault.yml)
+# Required variables:
+#   - kubernetes_version: "1.32.0-1.1"
+#   - vip: "192.168.1.99"
+#   - pod_network_cidr: "10.244.0.0/16"
+#   - pod_services_cidr: "10.96.0.0/12"
+#   - sandbox_image: "registry.k8s.io/pause:3.10"
+#   - domain_suffixes: ["", ".home", ".local"]
+#   - keepalived_auth_pass: "<secure-random-string>"
 
-# To edit encrypted vault:
-ansible-vault edit vault_secrets.yaml
-
-# To decrypt temporarily for viewing:
-ansible-vault decrypt vault_secrets.yaml --output vault_secrets_plain.yaml
+ansible-vault edit group_vars/all/vault.yml
 ```
 
-2. **Edit `inventory.ini`** - Update IPs and hostnames
+2. **Edit inventory** - Update `inventories/production/hosts.ini`
 
-3. **Validate playbooks:**
+3. **Validate:**
 
 ```bash
-ansible-playbook --extra-vars @vault_secrets.yaml --syntax-check 01_kube_apt_repo.yaml
-ansible-playbook --extra-vars @vault_secrets.yaml --syntax-check 02_install_kubernetes.yaml
-ansible-playbook --extra-vars @vault_secrets.yaml --syntax-check 03_containerd_and_networking.yaml
-ansible-playbook --extra-vars @vault_secrets.yaml --syntax-check 04_configure_ha_proxy_keepalived.yaml
-ansible-playbook --extra-vars @vault_secrets.yaml --syntax-check 05_initialize_master.yaml
-ansible-playbook --extra-vars @vault_secrets.yaml --syntax-check 06_join_other_nodes.yaml
-ansible-playbook --extra-vars @vault_secrets.yaml --syntax-check 07_configure_gpu_node.yaml
+ansible-playbook site.yml --syntax-check
 ```
 
-4. **Dry-run (optional):**
+4. **Deploy cluster:**
 
 ```bash
-ansible-playbook --extra-vars @vault_secrets.yaml 01_kube_apt_repo.yaml --check
-ansible-playbook --extra-vars @vault_secrets.yaml 02_install_kubernetes.yaml --check
-ansible-playbook --extra-vars @vault_secrets.yaml 03_containerd_and_networking.yaml --check
-ansible-playbook --extra-vars @vault_secrets.yaml 04_configure_ha_proxy_keepalived.yaml --check
-ansible-playbook --extra-vars @vault_secrets.yaml 05_initialize_master.yaml --check
+# Full deployment
+ansible-playbook site.yml
+
+# Or use tags for specific stages
+ansible-playbook site.yml --tags vms
+ansible-playbook site.yml --tags k8s
+ansible-playbook site.yml --tags ha
+ansible-playbook site.yml --tags init
+ansible-playbook site.yml --tags join
+ansible-playbook site.yml --tags gpu
+ansible-playbook site.yml --tags metrics
 ```
 
-5. **Deploy cluster:**
+5. **Alternative: Use individual playbooks:**
 
 ```bash
-ansible-playbook --extra-vars @vault_secrets.yaml 00_create_vms.yaml
-ansible-playbook --extra-vars @vault_secrets.yaml 01_kube_apt_repo.yaml
-ansible-playbook --extra-vars @vault_secrets.yaml 02_install_kubernetes.yaml
-ansible-playbook --extra-vars @vault_secrets.yaml 03_containerd_and_networking.yaml
-ansible-playbook --extra-vars @vault_secrets.yaml 04_configure_ha_proxy_keepalived.yaml
-ansible-playbook --extra-vars @vault_secrets.yaml 05_initialize_master.yaml
-ansible-playbook --extra-vars @vault_secrets.yaml 06_join_other_nodes.yaml
-ansible-playbook --extra-vars @vault_secrets.yaml 07_configure_gpu_node.yaml
-ansible-playbook --extra-vars @vault_secrets.yaml 20_metrics_server_certs_secrets.yaml
+ansible-playbook playbooks/create_vms.yml
+ansible-playbook playbooks/setup_cluster.yml
 ```
 
 ## Cluster Reset
 
 ```bash
-ansible -i inventory.ini k8s -b -m shell a 'sudo crictl stopp $(sudo crictl ps -a -q)'
-ansible -i inventory.ini k8s -b -m shell a 'sudo crictl rmp $(sudo crictl ps -a -q)'
-ansible -i inventory.ini k8s -b -m shell a 'sudo kill -9 $(pgrep container* )'
-ansible -i inventory.ini k8s -b -m shell -a 'sudo kill -9 $(pgrep kube*)'
-ansible -i inventory.ini k8s -b -a 'sudo systemctl stop kubelet containerd'
-ansible -i inventory.ini k8s -b -a 'sudo ip link delete flannel.1'
-ansible -i inventory.ini k8s -b -a 'sudo rm -rf /etc/cni/net.d /var/lib/cni /var/lib/etcd /var/lib/kubelet /etc/kubernetes /var/lib/containerd'
-ansible -i inventory.ini k8s -b -a 'sudo kubeadm reset --force'
-ansible -i inventory.ini k8s -b -a 'sudo ipvsadm --clear'
+ansible-playbook playbooks/reset_cluster.yml
 ```
 
 ## Debugging Commands
@@ -109,7 +119,7 @@ ansible -i inventory.ini k8s -b -a 'sudo ipvsadm --clear'
 **Check cluster status:**
 
 ```bash
-ansible -i inventory.ini k8s -b -a 'uptime'
+ansible k8s -a 'uptime'
 ```
 
 **Container runtime:**

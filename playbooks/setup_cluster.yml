@@ -1,0 +1,80 @@
+---
+- name: Configure Kubernetes apt repository
+  hosts: k8s
+  become: true
+  any_errors_fatal: true
+  roles:
+    - kubernetes_repo
+
+- name: Install Kubernetes components
+  hosts: k8s
+  become: true
+  any_errors_fatal: true
+  roles:
+    - kubernetes_install
+
+- name: Configure containerd and networking
+  hosts: k8s
+  become: true
+  any_errors_fatal: true
+  roles:
+    - containerd
+
+- name: Initialize Kubernetes master (using first master IP)
+  hosts: master
+  become: true
+  any_errors_fatal: true
+  roles:
+    - kubeadm_init
+
+- name: Join nodes to cluster
+  hosts: k8s
+  become: true
+  any_errors_fatal: true
+  roles:
+    - kubeadm_join
+
+- name: Configure HAProxy and Keepalived after cluster is stable
+  hosts: k8s_controller
+  become: true
+  vars:
+    haproxy_all_backends: true
+  roles:
+    - haproxy_keepalived
+
+- name: Update kubeconfigs to use VIP
+  hosts: k8s
+  become: true
+  tasks:
+    - name: Update kubelet.conf to use VIP
+      replace:
+        path: /etc/kubernetes/kubelet.conf
+        regexp: 'server: https://{{ hostvars[groups["k8s_controller"][0]]["ansible_default_ipv4"]["address"] }}:6443'
+        replace: 'server: https://{{ vip }}:6443'
+      notify: Restart kubelet
+
+    - name: Update admin.conf to use VIP (on controllers)
+      replace:
+        path: /etc/kubernetes/admin.conf
+        regexp: 'server: https://{{ hostvars[groups["k8s_controller"][0]]["ansible_default_ipv4"]["address"] }}:6443'
+        replace: 'server: https://{{ vip }}:6443'
+      when: inventory_hostname in groups['k8s_controller']
+
+  handlers:
+    - name: Restart kubelet
+      systemd:
+        name: kubelet
+        state: restarted
+
+- name: Configure GPU nodes
+  hosts: k8s_worker
+  become: true
+  roles:
+    - nvidia_gpu
+
+- name: Configure metrics server certificates
+  hosts: master
+  become: true
+  gather_facts: true
+  roles:
+    - metrics_server

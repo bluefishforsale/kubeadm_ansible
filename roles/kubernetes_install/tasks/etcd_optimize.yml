@@ -1,0 +1,49 @@
+---
+- name: Disable swap
+  command: swapoff -a
+  when: ansible_swaptotal_mb > 0
+
+- name: Remove swap from /etc/fstab
+  replace:
+    path: /etc/fstab
+    regexp: '^([^#].*swap.*)$'
+    replace: '# \1'
+
+- name: Set vm.swappiness to 0
+  sysctl:
+    name: vm.swappiness
+    value: '0'
+    state: present
+    sysctl_file: /etc/sysctl.d/99-k8s-etcd.conf
+
+- name: Set IO scheduler to noop/none for etcd stability
+  shell: |
+    echo none > /sys/block/sda/queue/scheduler || echo noop > /sys/block/sda/queue/scheduler
+  ignore_errors: true
+  when: not ansible_check_mode
+
+- name: High priority for I/O
+  sysctl:
+    name: "fs.inotify.max_user_watches"
+    value: "524288"
+    state: present
+    sysctl_file: /etc/sysctl.d/99-k8s-etcd.conf
+
+- name: Increase network limits for etcd
+  sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    sysctl_file: /etc/sysctl.d/99-k8s-etcd.conf
+  loop:
+    - { name: 'net.ipv4.tcp_keepalive_time', value: '600' }
+    - { name: 'net.ipv4.tcp_keepalive_intvl', value: '60' }
+    - { name: 'net.ipv4.tcp_keepalive_probes', value: '3' }
+
+- name: Mount /var/lib/etcd as tmpfs (RAM disk) to bypass slow disk I/O
+  mount:
+    path: /var/lib/etcd
+    src: tmpfs
+    fstype: tmpfs
+    opts: size=2G,noatime,mode=0700
+    state: mounted

@@ -1,0 +1,9 @@
+---
+- name: Create Proxmox VMs
+  hosts: proxmox
+  become: true
+  gather_facts: true
+  vars:
+    vm_ids: "{{ groups['k8s'] | map('regex_replace', '^kube', '') | list }}"
+  roles:
+    - proxmox_vm

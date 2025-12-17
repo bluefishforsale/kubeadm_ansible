@@ -1,0 +1,17 @@
+---
+- name: Restart containerd
+  systemd:
+    name: containerd
+    state: restarted
+  when: not ansible_check_mode
+
+- name: Restart journald
+  systemd:
+    name: systemd-journald
+    state: restarted
+  when: not ansible_check_mode
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+  when: not ansible_check_mode

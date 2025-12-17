@@ -1,0 +1,8 @@
+---
+cert_dir: /etc/metrics-server/tls
+csr_config: /tmp/metrics-server-csr.conf
+kubernetes_ca_cert: /etc/kubernetes/pki/ca.crt
+kubernetes_ca_key: /etc/kubernetes/pki/ca.key
+cert_days_valid: 3650
+metrics_server_secret: metrics-server-tls
+metrics_server_namespace: kube-system

@@ -1,0 +1,68 @@
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+  bindPort: 6443
+nodeRegistration:
+  kubeletExtraArgs:
+    - name: node-ip
+      value: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+kubernetesVersion: "v{{ kubernetes_version | regex_replace('^([0-9]+\\.[0-9]+\\.[0-9]+).*', '\\1') }}"
+controlPlaneEndpoint: "{{ hostvars[groups['k8s_controller'][0]]['ansible_default_ipv4']['address'] }}:6443"
+networking:
+  serviceSubnet: "{{ pod_services_cidr }}"
+  podSubnet: "{{ pod_network_cidr }}"
+etcd:
+  local:
+    extraArgs:
+      - name: quota-backend-bytes
+        value: "536870912"
+      - name: auto-compaction-mode
+        value: periodic
+      - name: auto-compaction-retention
+        value: "1h"
+      - name: snapshot-count
+        value: "5000"
+      - name: heartbeat-interval
+        value: "2000"
+      - name: election-timeout
+        value: "20000"
+      - name: unsafe-no-fsync
+        value: "true"
+      - name: max-request-bytes
+        value: "1572864"
+      - name: log-level
+        value: warn
+apiServer:
+  extraArgs:
+    - name: authorization-mode
+      value: Node,RBAC
+    - name: advertise-address
+      value: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"  # Node-specific IP
+    - name: bind-address
+      value: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"  # Node IP only, HAProxy handles VIP
+  certSANs:
+    - "localhost"
+    - "127.0.0.1"
+    - "{{ vip }}"
+{% for host in groups['k8s_controller'] %}
+    - "{{ hostvars[host]['ansible_default_ipv4']['address'] }}"
+{% endfor %}
+{% for domain in domain_suffixes %}
+{% for host in groups['k8s_controller'] %}
+    - "{{ hostvars[host]['inventory_hostname'] }}{{ domain }}"
+{% endfor %}
+    - "kubernetes{{ domain }}"
+    - "apiserver{{ domain }}"
+{% endfor %}
+---
+apiVersion: kubeproxy.config.k8s.io/v1alpha1
+kind: KubeProxyConfiguration
+mode: "ipvs"
+ipvs:
+  strictARP: true
+

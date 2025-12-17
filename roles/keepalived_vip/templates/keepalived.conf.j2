@@ -1,0 +1,28 @@
+vrrp_instance K8S_VIP {
+{% if inventory_hostname == groups['k8s_controller'][0] %}
+    state MASTER
+    priority 100
+{% else %}
+    state BACKUP
+    priority {{ ansible_default_ipv4.address.split('.')[-1] | int }}
+{% endif %}
+    nopreempt
+    interface {{ ansible_default_ipv4.interface }}
+    virtual_router_id 51
+    advert_int 1
+    authentication {
+        auth_type PASS
+        auth_pass {{ keepalived_auth_pass }}
+    }
+    virtual_ipaddress {
+        {{ vip }}/32
+    }
+    unicast_src_ip {{ ansible_default_ipv4.address }}
+    unicast_peer {
+{% for host in groups['k8s_controller'] %}
+{% if hostvars[host]['ansible_default_ipv4']['address'] != ansible_default_ipv4.address %}
+        {{ hostvars[host]['ansible_default_ipv4']['address'] }}
+{% endif %}
+{% endfor %}
+    }
+}

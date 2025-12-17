@@ -1,0 +1,60 @@
+---
+- name: Set kubectl command
+  set_fact:
+    kubectl: "kubectl --kubeconfig /etc/kubernetes/admin.conf"
+
+- name: Ensure certificate directory exists
+  file:
+    path: "{{ cert_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: 0755
+
+- name: Create CSR configuration file
+  template:
+    src: metrics-server.csr.j2
+    dest: "{{ csr_config }}"
+
+- name: Generate private key for metrics-server
+  command: >
+    openssl genrsa -out {{ cert_dir }}/serving.key 2048
+  args:
+    creates: "{{ cert_dir }}/serving.key"
+
+- name: Generate CSR for metrics-server
+  command: >
+    openssl req -new -key {{ cert_dir }}/serving.key
+    -out {{ cert_dir }}/serving.csr
+    -config {{ csr_config }}
+  args:
+    creates: "{{ cert_dir }}/serving.csr"
+
+- name: Sign metrics-server CSR with Kubernetes CA
+  command: >
+    openssl x509 -req -in {{ cert_dir }}/serving.csr
+    -CA {{ kubernetes_ca_cert }} -CAkey {{ kubernetes_ca_key }}
+    -CAcreateserial -out {{ cert_dir }}/serving.crt
+    -days {{ cert_days_valid }} -extensions ext
+    -extfile {{ csr_config }}
+  args:
+    creates: "{{ cert_dir }}/serving.crt"
+
+- name: Delete existing Secret
+  command: >
+    {{ kubectl }} delete secret {{ metrics_server_secret }} -n {{ metrics_server_namespace }}
+  register: delete_secret
+  failed_when: false
+  changed_when: delete_secret.rc == 0
+
+- name: Create Secret
+  command: >
+    {{ kubectl }} create secret generic {{ metrics_server_secret }}
+    -n {{ metrics_server_namespace }}
+    --from-file=serving.crt={{ cert_dir }}/serving.crt
+    --from-file=serving.key={{ cert_dir }}/serving.key
+
+- name: Clean up temporary CSR config file
+  file:
+    path: "{{ csr_config }}"
+    state: absent

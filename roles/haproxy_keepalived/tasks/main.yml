@@ -1,0 +1,83 @@
+---
+- name: Enable non-local IP binding for HAProxy VIP
+  sysctl:
+    name: net.ipv4.ip_nonlocal_bind
+    value: '1'
+    state: present
+    sysctl_file: /etc/sysctl.d/99-haproxy.conf
+    reload: yes
+
+- name: Install keepalived and haproxy
+  apt:
+    name:
+      - keepalived
+      - haproxy
+    state: present
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Create directories
+  file:
+    state: directory
+    path: "{{ item.path }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: '0700'
+  loop:
+    - { path: /etc/keepalived, owner: root, group: root }
+    - { path: /etc/haproxy, owner: haproxy, group: haproxy }
+    - { path: /etc/ssl/haproxy, owner: haproxy, group: haproxy }
+
+- name: Check if HAProxy PEM file exists
+  stat:
+    path: /etc/ssl/haproxy/haproxy.pem
+  register: pem_file_stat
+
+- name: Configure keepalived
+  template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+  notify:
+    - Reload systemd daemon
+    - Restart keepalived
+
+- name: Check for VIP on the interface
+  shell: "ip addr show | grep {{ vip }}"
+  register: vip_check
+  failed_when: vip_check.rc != 0 and vip_check.rc != 1
+  ignore_errors: true
+  changed_when: false
+
+- name: Print which host holds the VIP
+  debug:
+    msg: "The host {{ inventory_hostname }} holds the VIP {{ vip }}"
+  when: vip_check.rc == 0
+
+- name: Configure HAProxy
+  template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+  vars:
+    pem_exists: "{{ pem_file_stat.stat.exists | default(false) }}"
+  notify:
+    - Restart haproxy
+
+- name: Start and enable Keepalived FIRST (assigns VIP)
+  systemd:
+    name: keepalived
+    state: started
+    enabled: yes
+
+- name: Wait for VIP to be assigned
+  shell: "ip addr show | grep -q {{ vip }}"
+  register: vip_assigned
+  retries: 10
+  delay: 1
+  until: vip_assigned.rc == 0
+  when: inventory_hostname == groups['k8s_controller'][0]
+
+- name: Start and enable HAProxy (binds to VIP)
+  systemd:
+    name: haproxy
+    state: started
+    enabled: yes

@@ -1,0 +1,45 @@
+---
+- name: Install Helm if not present
+  shell: |
+    if ! command -v helm &> /dev/null; then
+      curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    fi
+  args:
+    creates: /usr/local/bin/helm
+
+- name: Add Cilium Helm repository
+  kubernetes.core.helm_repository:
+    name: cilium
+    repo_url: https://helm.cilium.io/
+    kubeconfig: /etc/kubernetes/admin.conf
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+
+- name: Install Cilium via Helm
+  kubernetes.core.helm:
+    name: cilium
+    chart_ref: cilium/cilium
+    chart_version: "{{ cilium_version | default('1.16.5') }}"
+    release_namespace: kube-system
+    create_namespace: false
+    kubeconfig: /etc/kubernetes/admin.conf
+    values:
+      operator:
+        replicas: 1
+      ipam:
+        mode: kubernetes
+      kubeProxyReplacement: "false"
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+
+- name: Wait for Cilium agent to be ready
+  shell: |
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf wait --for=condition=ready pod -l app.kubernetes.io/name=cilium-agent -n kube-system --timeout=300s
+  register: cilium_ready
+  retries: 5
+  delay: 30
+  until: cilium_ready.rc == 0
+
+- name: Wait for cluster to stabilize after CNI install
+  pause:
+    seconds: 30
