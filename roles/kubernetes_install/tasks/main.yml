@@ -25,3 +25,20 @@
     - kubeadm
     - kubectl
   when: not ansible_check_mode
+
+- name: Install cloud-guest-utils for disk resizing
+  apt:
+    name: cloud-guest-utils
+    state: present
+  when: not ansible_check_mode
+
+- name: Expand root partition
+  shell: growpart /dev/sda 1 || true
+  register: growpart_result
+  changed_when: "'CHANGED' in growpart_result.stdout"
+  failed_when: false
+  when: not ansible_check_mode
+
+- name: Resize root filesystem
+  shell: resize2fs /dev/sda1
+  when: not ansible_check_mode and growpart_result.changed
