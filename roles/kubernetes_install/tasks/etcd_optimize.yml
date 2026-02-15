@@ -10,7 +10,7 @@
     replace: '# \1'
 
 - name: Set vm.swappiness to 0
-  sysctl:
+  ansible.posix.sysctl:
     name: vm.swappiness
     value: '0'
     state: present
@@ -23,14 +23,14 @@
   when: not ansible_check_mode
 
 - name: High priority for I/O
-  sysctl:
+  ansible.posix.sysctl:
     name: "fs.inotify.max_user_watches"
     value: "524288"
     state: present
     sysctl_file: /etc/sysctl.d/99-k8s-etcd.conf
 
 - name: Increase network limits for etcd
-  sysctl:
+  ansible.posix.sysctl:
     name: "{{ item.name }}"
     value: "{{ item.value }}"
     state: present

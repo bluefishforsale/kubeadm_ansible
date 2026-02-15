@@ -102,7 +102,7 @@
   when: not ansible_check_mode
 
 - name: Load br_netfilter module
-  modprobe:
+  community.general.modprobe:
     name: br_netfilter
     state: present
   when: not ansible_check_mode
@@ -116,7 +116,7 @@
   when: not ansible_check_mode
 
 - name: Apply kernel parameters for Kubernetes networking
-  sysctl:
+  ansible.posix.sysctl:
     name: "{{ item.name }}"
     value: "{{ item.value }}"
     state: present

@@ -1,0 +1,242 @@
+name: Manual Operations
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Operation to perform'
+        required: true
+        type: choice
+        options:
+        - health-check
+        - restart-services
+        - cluster-status
+        - backup-config
+        - roll-back
+      target_hosts:
+        description: 'Target hosts'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - k8s
+        - k8s_controller
+        - k8s_worker
+        - proxmox
+      service_name:
+        description: 'Service name (for restart-services)'
+        required: false
+        default: ''
+      dry_run:
+        description: 'Dry run only'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  manual-operation:
+    name: Execute Manual Operation
+    runs-on: self-hosted  # Uses existing homelab runner infrastructure
+    environment: production
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python & Ansible
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        pip install ansible-core kubernetes PyYAML
+        
+    - name: Set up SSH key
+      uses: webfactory/ssh-agent@v0.8.0
+      with:
+        ssh-private-key: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
+        
+    # Vault password will be handled per-step to avoid leaving temp files around
+        
+    - name: Execute Health Check
+      if: github.event.inputs.operation == 'health-check'
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+      run: |
+        echo "🏥 Running health check on ${{ github.event.inputs.target_hosts }}..."
+        
+        # Create temporary vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
+        
+        # Run the health check script if it exists
+        if [ -f "k8s-health-monitoring/scripts/health-check.sh" ]; then
+          ansible ${{ github.event.inputs.target_hosts }} -i inventories/production/hosts.ini \
+            -m script -a "k8s-health-monitoring/scripts/health-check.sh" \
+            --vault-password-file=/tmp/.vault_pass
+        else
+          # Basic health checks
+          ansible ${{ github.event.inputs.target_hosts }} -i inventories/production/hosts.ini \
+            -m shell -a "uptime && df -h && free -m" \
+            --vault-password-file=/tmp/.vault_pass
+        fi
+        
+        # Clean up
+        rm -f /tmp/.vault_pass
+        
+    - name: Restart Services
+      if: github.event.inputs.operation == 'restart-services'
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+      run: |
+        echo "🔄 Restarting services on ${{ github.event.inputs.target_hosts }}..."
+        
+        if [ -z "${{ github.event.inputs.service_name }}" ]; then
+          echo "❌ Service name required for restart operation"
+          exit 1
+        fi
+        
+        # Create temporary vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
+        
+        if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+          echo "🧪 DRY RUN: Would restart ${{ github.event.inputs.service_name }}"
+          ansible ${{ github.event.inputs.target_hosts }} -i inventories/production/hosts.ini \
+            -m shell -a "systemctl status ${{ github.event.inputs.service_name }}" \
+            --vault-password-file=/tmp/.vault_pass
+        else
+          ansible ${{ github.event.inputs.target_hosts }} -i inventories/production/hosts.ini \
+            -m systemd -a "name=${{ github.event.inputs.service_name }} state=restarted" \
+            --vault-password-file=/tmp/.vault_pass --become
+        fi
+        
+        # Clean up
+        rm -f /tmp/.vault_pass
+        
+# Update Monitoring operation removed - monitoring playbooks are in separate repository
+        
+    - name: Cluster Status
+      if: github.event.inputs.operation == 'cluster-status'
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+      run: |
+        echo "🔍 Checking cluster status..."
+        
+        # Create temporary vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
+        
+        # K8s API health
+        echo "=== Kubernetes API Health ==="
+        ansible k8s_controller[0] -i inventories/production/hosts.ini \
+          -m shell -a "curl -s -k https://192.168.1.99:6443/healthz" \
+          --vault-password-file=/tmp/.vault_pass
+          
+        # Node status
+        echo "=== Node Status ==="
+        ansible k8s_controller[0] -i inventories/production/hosts.ini \
+          -m shell -a "kubectl get nodes -o wide" \
+          --vault-password-file=/tmp/.vault_pass || true
+          
+        # Pod status
+        echo "=== Pod Status ==="
+        ansible k8s_controller[0] -i inventories/production/hosts.ini \
+          -m shell -a "kubectl get pods --all-namespaces | grep -E '(Error|CrashLoop|Pending)' || echo 'All pods healthy'" \
+          --vault-password-file=/tmp/.vault_pass || true
+          
+        # Service status on nodes
+        echo "=== Service Status ==="
+        ansible k8s -i inventories/production/hosts.ini \
+          -m shell -a "systemctl status kubelet containerd --no-pager -l" \
+          --vault-password-file=/tmp/.vault_pass || true
+          
+        # Clean up
+        rm -f /tmp/.vault_pass
+          
+    - name: Backup Config
+      if: github.event.inputs.operation == 'backup-config'
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+      run: |
+        echo "💾 Backing up configurations..."
+        
+        # Create backup directory with timestamp
+        BACKUP_DIR="backups/$(date +%Y%m%d-%H%M%S)"
+        mkdir -p "$BACKUP_DIR"
+        
+        # Create temporary vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
+        
+        # Backup K8s configs from controller
+        ansible k8s_controller[0] -i inventories/production/hosts.ini \
+          -m fetch -a "src=/etc/kubernetes/admin.conf dest=$BACKUP_DIR/kubeconfig flat=yes" \
+          --vault-password-file=/tmp/.vault_pass || true
+          
+        # Backup important configs
+        ansible k8s -i inventories/production/hosts.ini \
+          -m fetch -a "src=/etc/systemd/system/kubelet.service.d/10-kubeadm.conf dest=$BACKUP_DIR/ flat=no" \
+          --vault-password-file=/tmp/.vault_pass || true
+          
+        # Clean up
+        rm -f /tmp/.vault_pass
+        
+        echo "✅ Backup completed in $BACKUP_DIR"
+        
+    - name: Roll Back
+      if: github.event.inputs.operation == 'roll-back'
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+      run: |
+        echo "⏪ Rolling back last deployment..."
+        
+        if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+          echo "🧪 DRY RUN: Would roll back monitoring deployment"
+          echo "This would:"
+          echo "  - Remove kube-state-metrics from cluster"
+          echo "  - Stop and disable cAdvisor services"
+          echo "  - Restore previous configurations"
+        else
+          echo "⚠️  LIVE ROLLBACK - This will revert monitoring changes"
+          
+          # Create temporary vault password file
+          echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+          chmod 600 /tmp/.vault_pass
+          
+          # Remove kube-state-metrics
+          ansible k8s_controller[0] -i inventories/production/hosts.ini \
+            -m shell -a "kubectl delete -f k8s-health-monitoring/monitoring/kube-state-metrics.yaml" \
+            --vault-password-file=/tmp/.vault_pass || true
+            
+          # Stop cAdvisor
+          ansible k8s -i inventories/production/hosts.ini \
+            -m systemd -a "name=cadvisor state=stopped enabled=no" \
+            --vault-password-file=/tmp/.vault_pass --become || true
+            
+          # Clean up
+          rm -f /tmp/.vault_pass
+          
+          echo "✅ Rollback completed"
+        fi
+        
+    # Vault password files are cleaned up after each operation
+        
+    - name: Create operation summary
+      if: always()
+      run: |
+        echo "## 🛠️ Manual Operation Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Operation:** ${{ github.event.inputs.operation }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Target Hosts:** ${{ github.event.inputs.target_hosts }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Dry Run:** ${{ github.event.inputs.dry_run }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ job.status }}" = "success" ]; then
+          echo "✅ Operation completed successfully!" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ Operation failed. Check logs for details." >> $GITHUB_STEP_SUMMARY
+        fi
