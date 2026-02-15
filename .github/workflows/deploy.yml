@@ -1,0 +1,184 @@
+name: Deploy Infrastructure Changes
+
+on:
+  push:
+    branches: [ main, master ]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - '*.md'
+  workflow_dispatch:
+    inputs:
+      playbook:
+        description: 'Playbook to run'
+        required: false
+        default: 'site.yml'
+        type: choice
+        options:
+        - site.yml
+        - k8s-health-monitoring/playbooks/deploy-monitoring.yml
+      target_hosts:
+        description: 'Target hosts (default: all)'
+        required: false
+        default: 'all'
+      dry_run:
+        description: 'Dry run only (no changes)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  deploy:
+    name: Deploy to Infrastructure
+    runs-on: self-hosted  # Requires runner with access to homelab network
+    # Alternative: runs-on: ubuntu-latest (if using VPN/bastion)
+    
+    environment: production  # Requires manual approval for production
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python & Ansible
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install Ansible and dependencies
+      run: |
+        pip install ansible-core kubernetes PyYAML jmespath
+        
+    - name: Set up SSH key
+      uses: webfactory/ssh-agent@v0.8.0
+      with:
+        ssh-private-key: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
+        
+    - name: Configure Ansible vault password
+      run: |
+        echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > .vault_password
+        chmod 600 .vault_password
+        export ANSIBLE_VAULT_PASSWORD_FILE=.vault_password
+        
+    - name: Verify connectivity to hosts
+      run: |
+        ansible all -i inventories/production/hosts.ini -m ping --vault-password-file=.vault_password
+        
+    - name: Run pre-deployment health check
+      run: |
+        # Check cluster health before deployment
+        ansible k8s_controller[0] -i inventories/production/hosts.ini -m shell \
+          -a "curl -s -k https://192.168.1.99:6443/healthz" --vault-password-file=.vault_password
+          
+    - name: Determine playbook to run
+      id: playbook
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          PLAYBOOK="${{ github.event.inputs.playbook }}"
+          DRY_RUN="${{ github.event.inputs.dry_run }}"
+          TARGET_HOSTS="${{ github.event.inputs.target_hosts }}"
+        else
+          PLAYBOOK="site.yml"
+          DRY_RUN="false"
+          TARGET_HOSTS="all"
+        fi
+        
+        echo "playbook=${PLAYBOOK}" >> $GITHUB_OUTPUT
+        echo "dry_run=${DRY_RUN}" >> $GITHUB_OUTPUT
+        echo "target_hosts=${TARGET_HOSTS}" >> $GITHUB_OUTPUT
+        
+    - name: Run Ansible deployment (dry run)
+      if: steps.playbook.outputs.dry_run == 'true'
+      run: |
+        ansible-playbook ${{ steps.playbook.outputs.playbook }} \
+          -i inventories/production/hosts.ini \
+          --limit ${{ steps.playbook.outputs.target_hosts }} \
+          --vault-password-file=.vault_password \
+          --check --diff
+          
+    - name: Run Ansible deployment (live)
+      if: steps.playbook.outputs.dry_run == 'false'
+      run: |
+        ansible-playbook ${{ steps.playbook.outputs.playbook }} \
+          -i inventories/production/hosts.ini \
+          --limit ${{ steps.playbook.outputs.target_hosts }} \
+          --vault-password-file=.vault_password \
+          --diff
+          
+    - name: Post-deployment verification
+      if: success()
+      run: |
+        echo "🔍 Running post-deployment verification..."
+        
+        # Check cluster health
+        ansible k8s_controller[0] -i inventories/production/hosts.ini -m shell \
+          -a "curl -s -k https://192.168.1.99:6443/healthz" --vault-password-file=.vault_password
+          
+        # If monitoring playbook was run, verify metrics
+        if [[ "${{ steps.playbook.outputs.playbook }}" == *"monitoring"* ]]; then
+          echo "Verifying monitoring deployment..."
+          
+          # Check kube-state-metrics
+          ansible k8s_controller[0] -i inventories/production/hosts.ini -m shell \
+            -a "kubectl get pods -n kube-system -l app.kubernetes.io/name=kube-state-metrics" \
+            --vault-password-file=.vault_password || true
+            
+          # Check cAdvisor on nodes
+          ansible k8s -i inventories/production/hosts.ini -m shell \
+            -a "systemctl is-active cadvisor" \
+            --vault-password-file=.vault_password || true
+        fi
+        
+    - name: Clean up sensitive files
+      if: always()
+      run: |
+        rm -f .vault_password
+        
+    - name: Create deployment summary
+      if: always()
+      run: |
+        echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Playbook:** \`${{ steps.playbook.outputs.playbook }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Target Hosts:** ${{ steps.playbook.outputs.target_hosts }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Dry Run:** ${{ steps.playbook.outputs.dry_run }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ job.status }}" = "success" ]; then
+          echo "✅ Deployment completed successfully!" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ Deployment failed. Check logs for details." >> $GITHUB_STEP_SUMMARY
+        fi
+
+  notify:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: always()
+    
+    steps:
+    - name: Notify Discord on success
+      if: needs.deploy.result == 'success'
+      uses: sarisia/actions-status-discord@v1
+      with:
+        webhook: ${{ secrets.DISCORD_WEBHOOK }}
+        title: "✅ Deployment Successful"
+        description: |
+          **Repository:** ${{ github.repository }}
+          **Branch:** ${{ github.ref_name }}
+          **Commit:** ${{ github.sha }}
+          **Playbook:** ${{ needs.deploy.outputs.playbook || 'site.yml' }}
+        color: 0x00ff00
+        
+    - name: Notify Discord on failure  
+      if: needs.deploy.result == 'failure'
+      uses: sarisia/actions-status-discord@v1
+      with:
+        webhook: ${{ secrets.DISCORD_WEBHOOK }}
+        title: "❌ Deployment Failed"
+        description: |
+          **Repository:** ${{ github.repository }}
+          **Branch:** ${{ github.ref_name }}
+          **Commit:** ${{ github.sha }}
+          **Action:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        color: 0xff0000
