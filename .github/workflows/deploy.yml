@@ -16,7 +16,6 @@ on:
         type: choice
         options:
         - site.yml
-        - k8s-health-monitoring/playbooks/deploy-monitoring.yml
       target_hosts:
         description: 'Target hosts (default: all)'
         required: false
@@ -145,20 +144,7 @@ jobs:
         ansible k8s_controller[0] -i inventories/production/hosts.ini -m shell \
           -a "curl -s -k https://192.168.1.99:6443/healthz" --vault-password-file=/tmp/.vault_pass
           
-        # If monitoring playbook was run, verify metrics
-        if [[ "${{ steps.playbook.outputs.playbook }}" == *"monitoring"* ]]; then
-          echo "Verifying monitoring deployment..."
-          
-          # Check kube-state-metrics
-          ansible k8s_controller[0] -i inventories/production/hosts.ini -m shell \
-            -a "kubectl get pods -n kube-system -l app.kubernetes.io/name=kube-state-metrics" \
-            --vault-password-file=/tmp/.vault_pass || true
-            
-          # Check cAdvisor on nodes
-          ansible k8s -i inventories/production/hosts.ini -m shell \
-            -a "systemctl is-active cadvisor" \
-            --vault-password-file=/tmp/.vault_pass || true
-        fi
+        echo "✅ Post-deployment verification complete"
         
         # Clean up
         rm -f /tmp/.vault_pass

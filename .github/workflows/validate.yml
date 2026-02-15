@@ -79,8 +79,7 @@ jobs:
         # Clean up
         rm -rf /tmp/.vault_pass /tmp/ci_vars
         
-    - name: Ansible syntax check - monitoring playbook
-      if: hashFiles('k8s-health-monitoring/playbooks/deploy-monitoring.yml') != ''
+    - name: Ansible syntax check - individual playbooks
       env:
         ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
@@ -92,7 +91,13 @@ jobs:
         mkdir -p /tmp/ci_vars
         cp .github/ci_group_vars.yml /tmp/ci_vars/all.yml
         
-        ansible-playbook k8s-health-monitoring/playbooks/deploy-monitoring.yml --syntax-check --vault-password-file=/tmp/.vault_pass -i .github/ci_inventory.ini -e "@/tmp/ci_vars/all.yml"
+        # Check any individual playbooks that exist
+        for playbook in playbooks/*.yml playbooks/*.yaml; do
+          if [ -f "$playbook" ]; then
+            echo "Checking $playbook"
+            ansible-playbook "$playbook" --syntax-check --vault-password-file=/tmp/.vault_pass -i .github/ci_inventory.ini -e "@/tmp/ci_vars/all.yml"
+          fi
+        done
         
         # Clean up
         rm -rf /tmp/.vault_pass /tmp/ci_vars
@@ -264,8 +269,7 @@ jobs:
         # Clean up
         rm -rf /tmp/.vault_pass /tmp/ci_vars
         
-    - name: Dry run - monitoring playbook
-      if: hashFiles('k8s-health-monitoring/playbooks/deploy-monitoring.yml') != ''
+    - name: Dry run - individual playbooks
       env:
         ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
@@ -277,7 +281,13 @@ jobs:
         mkdir -p /tmp/ci_vars
         cp .github/ci_group_vars.yml /tmp/ci_vars/all.yml
         
-        ansible-playbook k8s-health-monitoring/playbooks/deploy-monitoring.yml -i .github/ci_inventory.ini --check --diff --vault-password-file=/tmp/.vault_pass -e "@/tmp/ci_vars/all.yml" || true
+        # Dry run any individual playbooks that exist
+        for playbook in playbooks/*.yml playbooks/*.yaml; do
+          if [ -f "$playbook" ]; then
+            echo "Dry run: $playbook"
+            ansible-playbook "$playbook" -i .github/ci_inventory.ini --check --diff --vault-password-file=/tmp/.vault_pass -e "@/tmp/ci_vars/all.yml" || true
+          fi
+        done
         
         # Clean up
         rm -rf /tmp/.vault_pass /tmp/ci_vars

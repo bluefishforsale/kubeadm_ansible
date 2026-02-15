@@ -10,7 +10,6 @@ on:
         options:
         - health-check
         - restart-services
-        - update-monitoring
         - cluster-status
         - backup-config
         - roll-back
@@ -117,33 +116,7 @@ jobs:
         # Clean up
         rm -f /tmp/.vault_pass
         
-    - name: Update Monitoring
-      if: github.event.inputs.operation == 'update-monitoring'
-      env:
-        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
-      run: |
-        echo "📊 Updating monitoring stack..."
-        
-        # Create temporary vault password file
-        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
-        chmod 600 /tmp/.vault_pass
-        
-        if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-          ansible-playbook k8s-health-monitoring/playbooks/deploy-monitoring.yml \
-            -i inventories/production/hosts.ini \
-            --limit ${{ github.event.inputs.target_hosts }} \
-            --vault-password-file=/tmp/.vault_pass \
-            --check --diff
-        else
-          ansible-playbook k8s-health-monitoring/playbooks/deploy-monitoring.yml \
-            -i inventories/production/hosts.ini \
-            --limit ${{ github.event.inputs.target_hosts }} \
-            --vault-password-file=/tmp/.vault_pass \
-            --diff
-        fi
-        
-        # Clean up
-        rm -f /tmp/.vault_pass
+# Update Monitoring operation removed - monitoring playbooks are in separate repository
         
     - name: Cluster Status
       if: github.event.inputs.operation == 'cluster-status'
