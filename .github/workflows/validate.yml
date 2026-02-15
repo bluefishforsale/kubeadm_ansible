@@ -57,9 +57,9 @@ jobs:
         ansible-inventory --list -i inventories/production/hosts.ini --vault-password-file=/tmp/.vault_pass > /dev/null
         echo "✅ Production inventory syntax valid"
         
-        # Test CI inventory (no vault needed)
+        # Test CI inventory (still needs vault due to group_vars auto-loading)
         echo "Testing CI inventory..."
-        ansible-inventory --list -i .github/ci_inventory.ini > /dev/null
+        ansible-inventory --list -i .github/ci_inventory.ini --vault-password-file=/tmp/.vault_pass > /dev/null
         echo "✅ CI inventory syntax valid"
         
         rm -f /tmp/.vault_pass
