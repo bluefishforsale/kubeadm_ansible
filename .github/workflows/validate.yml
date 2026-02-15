@@ -30,7 +30,7 @@ jobs:
         
     - name: Install Ansible collections
       run: |
-        ansible-galaxy collection install community.general kubernetes.core
+        ansible-galaxy collection install community.general kubernetes.core ansible.posix
         
     - name: Create ansible.cfg if missing
       run: |
@@ -231,7 +231,7 @@ jobs:
         
     - name: Install Ansible collections
       run: |
-        ansible-galaxy collection install community.general kubernetes.core
+        ansible-galaxy collection install community.general kubernetes.core ansible.posix
         
     - name: Create mock inventory for dry run
       run: |
