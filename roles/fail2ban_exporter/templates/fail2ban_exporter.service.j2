@@ -1,0 +1,21 @@
+[Unit]
+Description=Fail2ban Exporter
+Documentation=https://github.com/jangrewe/fail2ban_exporter
+After=network.target fail2ban.service
+Requires=fail2ban.service
+
+[Service]
+Type=simple
+User={{ fail2ban_exporter_user }}
+Group={{ fail2ban_exporter_group }}
+ExecStart={{ fail2ban_exporter_bin_path }} \
+  --web.listen-address=:{{ fail2ban_exporter_port }} \
+  --web.telemetry-path={{ fail2ban_exporter_web_path }} \
+  --fail2ban.socket={{ fail2ban_socket_path }}
+
+SyslogIdentifier=fail2ban_exporter
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

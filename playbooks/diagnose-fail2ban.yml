@@ -1,0 +1,119 @@
+---
+- name: Diagnose fail2ban and fail2ban-exporter status
+  hosts: k8s
+  become: true
+  gather_facts: true
+  tags: [diagnostics, fail2ban]
+  
+  tasks:
+    - name: Check if fail2ban is installed
+      ansible.builtin.package_facts:
+        manager: auto
+      
+    - name: Display fail2ban installation status
+      ansible.builtin.debug:
+        msg: "fail2ban {{ 'is installed' if 'fail2ban' in ansible_facts.packages else 'is NOT installed' }}"
+    
+    - name: Check fail2ban service status
+      ansible.builtin.systemd:
+        name: fail2ban
+      register: fail2ban_service
+      failed_when: false
+      
+    - name: Display fail2ban service status
+      ansible.builtin.debug:
+        msg: |
+          Service: {{ fail2ban_service.status.ActiveState | default('not found') }}
+          Loaded: {{ fail2ban_service.status.LoadState | default('not found') }}
+          Enabled: {{ fail2ban_service.status.UnitFileState | default('not found') }}
+      when: fail2ban_service.status is defined
+      
+    - name: Check if fail2ban-exporter is installed
+      ansible.builtin.stat:
+        path: /usr/local/bin/fail2ban_exporter
+      register: fail2ban_exporter_binary
+      
+    - name: Display fail2ban-exporter binary status
+      ansible.builtin.debug:
+        msg: "fail2ban-exporter binary {{ 'exists' if fail2ban_exporter_binary.stat.exists else 'NOT found' }}"
+        
+    - name: Check fail2ban-exporter service status
+      ansible.builtin.systemd:
+        name: fail2ban_exporter
+      register: exporter_service
+      failed_when: false
+      
+    - name: Display fail2ban-exporter service status
+      ansible.builtin.debug:
+        msg: |
+          Service: {{ exporter_service.status.ActiveState | default('not found') }}
+          Loaded: {{ exporter_service.status.LoadState | default('not found') }}
+          Enabled: {{ exporter_service.status.UnitFileState | default('not found') }}
+      when: exporter_service.status is defined
+      
+    - name: Check fail2ban-exporter systemd unit file
+      ansible.builtin.stat:
+        path: /etc/systemd/system/fail2ban_exporter.service
+      register: exporter_unit
+      
+    - name: Display systemd unit file status
+      ansible.builtin.debug:
+        msg: "fail2ban_exporter.service unit file {{ 'exists' if exporter_unit.stat.exists else 'NOT found' }}"
+        
+    - name: Check fail2ban logs (last 20 lines)
+      ansible.builtin.command: journalctl -u fail2ban -n 20 --no-pager
+      register: fail2ban_logs
+      changed_when: false
+      failed_when: false
+      
+    - name: Display fail2ban logs
+      ansible.builtin.debug:
+        var: fail2ban_logs.stdout_lines
+      when: fail2ban_logs.rc == 0
+      
+    - name: Check fail2ban-exporter logs (last 20 lines)
+      ansible.builtin.command: journalctl -u fail2ban_exporter -n 20 --no-pager
+      register: exporter_logs
+      changed_when: false
+      failed_when: false
+      
+    - name: Display fail2ban-exporter logs
+      ansible.builtin.debug:
+        var: exporter_logs.stdout_lines
+      when: exporter_logs.rc == 0
+      
+    - name: Check fail2ban socket file
+      ansible.builtin.stat:
+        path: /var/run/fail2ban/fail2ban.sock
+      register: fail2ban_socket
+      
+    - name: Display fail2ban socket status
+      ansible.builtin.debug:
+        msg: "fail2ban socket {{ 'exists' if fail2ban_socket.stat.exists else 'NOT found' }}"
+        
+    - name: Test fail2ban-exporter metrics endpoint
+      ansible.builtin.uri:
+        url: http://localhost:9191/metrics
+        return_content: no
+        status_code: [200, -1]
+      register: metrics_check
+      failed_when: false
+      
+    - name: Display metrics endpoint status
+      ansible.builtin.debug:
+        msg: "Metrics endpoint: {{ 'accessible' if metrics_check.status == 200 else 'NOT accessible (status: ' + (metrics_check.status | string) + ')' }}"
+        
+    - name: Generate summary report
+      ansible.builtin.debug:
+        msg: |
+          ========================================
+          Summary for {{ inventory_hostname }}
+          ========================================
+          fail2ban installed: {{ 'yes' if 'fail2ban' in ansible_facts.packages else 'NO' }}
+          fail2ban service: {{ fail2ban_service.status.ActiveState | default('not found') }}
+          fail2ban-exporter binary: {{ 'yes' if fail2ban_exporter_binary.stat.exists else 'NO' }}
+          fail2ban-exporter service: {{ exporter_service.status.ActiveState | default('not found') }}
+          fail2ban-exporter unit file: {{ 'yes' if exporter_unit.stat.exists else 'NO' }}
+          fail2ban socket: {{ 'yes' if fail2ban_socket.stat.exists else 'NO' }}
+          Metrics endpoint: {{ 'OK' if metrics_check.status == 200 else 'FAILED' }}
+          ========================================

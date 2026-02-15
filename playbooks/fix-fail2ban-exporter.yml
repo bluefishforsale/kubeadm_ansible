@@ -1,0 +1,18 @@
+---
+- name: Fix and deploy fail2ban-exporter
+  hosts: k8s
+  become: true
+  gather_facts: true
+  tags: [monitoring, fail2ban]
+  
+  roles:
+    - fail2ban_exporter
+    
+  post_tasks:
+    - name: Display success message
+      ansible.builtin.debug:
+        msg: |
+          ========================================
+          fail2ban-exporter deployed successfully on {{ inventory_hostname }}
+          Metrics available at: http://{{ ansible_default_ipv4.address }}:9191/metrics
+          ========================================

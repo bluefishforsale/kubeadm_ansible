@@ -1,0 +1,20 @@
+---
+# fail2ban_exporter role defaults
+
+# fail2ban-exporter version
+fail2ban_exporter_version: "0.11.0"
+
+# Installation paths
+fail2ban_exporter_bin_path: "/usr/local/bin/fail2ban_exporter"
+fail2ban_exporter_user: "prometheus"
+fail2ban_exporter_group: "prometheus"
+
+# Service configuration
+fail2ban_exporter_port: 9191
+fail2ban_exporter_web_path: "/metrics"
+
+# fail2ban socket path
+fail2ban_socket_path: "/var/run/fail2ban/fail2ban.sock"
+
+# Download URL
+fail2ban_exporter_download_url: "https://github.com/jangrewe/fail2ban_exporter/releases/download/v{{ fail2ban_exporter_version }}/fail2ban_exporter-{{ fail2ban_exporter_version }}.linux-amd64.tar.gz"

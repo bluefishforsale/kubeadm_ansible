@@ -1,0 +1,98 @@
+---
+- name: Ensure fail2ban is installed
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+    update_cache: yes
+
+- name: Ensure fail2ban service is running
+  ansible.builtin.systemd:
+    name: fail2ban
+    state: started
+    enabled: yes
+
+- name: Create prometheus system user
+  ansible.builtin.user:
+    name: "{{ fail2ban_exporter_user }}"
+    system: yes
+    shell: /bin/false
+    create_home: no
+
+- name: Check if fail2ban_exporter is already installed
+  ansible.builtin.stat:
+    path: "{{ fail2ban_exporter_bin_path }}"
+  register: fail2ban_exporter_bin
+
+- name: Download and install fail2ban_exporter
+  when: not fail2ban_exporter_bin.stat.exists
+  block:
+    - name: Create temporary directory
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: fail2ban_exporter
+      register: temp_dir
+
+    - name: Download fail2ban_exporter
+      ansible.builtin.get_url:
+        url: "{{ fail2ban_exporter_download_url }}"
+        dest: "{{ temp_dir.path }}/fail2ban_exporter.tar.gz"
+        mode: '0644'
+
+    - name: Extract fail2ban_exporter
+      ansible.builtin.unarchive:
+        src: "{{ temp_dir.path }}/fail2ban_exporter.tar.gz"
+        dest: "{{ temp_dir.path }}"
+        remote_src: yes
+
+    - name: Install fail2ban_exporter binary
+      ansible.builtin.copy:
+        src: "{{ temp_dir.path }}/fail2ban_exporter-{{ fail2ban_exporter_version }}.linux-amd64/fail2ban_exporter"
+        dest: "{{ fail2ban_exporter_bin_path }}"
+        mode: '0755'
+        owner: root
+        group: root
+        remote_src: yes
+
+    - name: Clean up temporary directory
+      ansible.builtin.file:
+        path: "{{ temp_dir.path }}"
+        state: absent
+
+- name: Add prometheus user to fail2ban group for socket access
+  ansible.builtin.user:
+    name: "{{ fail2ban_exporter_user }}"
+    groups: fail2ban
+    append: yes
+  notify: restart fail2ban_exporter
+
+- name: Create fail2ban_exporter systemd service
+  ansible.builtin.template:
+    src: fail2ban_exporter.service.j2
+    dest: /etc/systemd/system/fail2ban_exporter.service
+    mode: '0644'
+  notify: restart fail2ban_exporter
+
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: yes
+
+- name: Enable and start fail2ban_exporter service
+  ansible.builtin.systemd:
+    name: fail2ban_exporter
+    state: started
+    enabled: yes
+
+- name: Wait for fail2ban_exporter to be ready
+  ansible.builtin.wait_for:
+    port: "{{ fail2ban_exporter_port }}"
+    delay: 2
+    timeout: 30
+
+- name: Verify fail2ban_exporter metrics endpoint
+  ansible.builtin.uri:
+    url: "http://localhost:{{ fail2ban_exporter_port }}{{ fail2ban_exporter_web_path }}"
+    return_content: no
+  register: metrics_check
+  failed_when: metrics_check.status != 200
+  retries: 3
+  delay: 5
