@@ -49,13 +49,31 @@ jobs:
         ansible-inventory --list -i inventories/production/hosts.ini > /dev/null
         
     - name: Ansible syntax check - main playbook
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
-        ansible-playbook site.yml --syntax-check
+        # Create temporary vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
+        
+        ansible-playbook site.yml --syntax-check --vault-password-file=/tmp/.vault_pass
+        
+        # Clean up
+        rm -f /tmp/.vault_pass
         
     - name: Ansible syntax check - monitoring playbook
       if: hashFiles('k8s-health-monitoring/playbooks/deploy-monitoring.yml') != ''
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
-        ansible-playbook k8s-health-monitoring/playbooks/deploy-monitoring.yml --syntax-check
+        # Create temporary vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
+        
+        ansible-playbook k8s-health-monitoring/playbooks/deploy-monitoring.yml --syntax-check --vault-password-file=/tmp/.vault_pass
+        
+        # Clean up
+        rm -f /tmp/.vault_pass
         
     - name: Ansible-lint validation
       run: |
@@ -159,13 +177,31 @@ jobs:
         EOF
         
     - name: Dry run - main playbook
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
-        ansible-playbook site.yml -i inventories/test/hosts.ini --check --diff || true
+        # Create temporary vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
+        
+        ansible-playbook site.yml -i inventories/test/hosts.ini --check --diff --vault-password-file=/tmp/.vault_pass || true
+        
+        # Clean up
+        rm -f /tmp/.vault_pass
         
     - name: Dry run - monitoring playbook
       if: hashFiles('k8s-health-monitoring/playbooks/deploy-monitoring.yml') != ''
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
-        ansible-playbook k8s-health-monitoring/playbooks/deploy-monitoring.yml -i inventories/test/hosts.ini --check --diff || true
+        # Create temporary vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
+        
+        ansible-playbook k8s-health-monitoring/playbooks/deploy-monitoring.yml -i inventories/test/hosts.ini --check --diff --vault-password-file=/tmp/.vault_pass || true
+        
+        # Clean up
+        rm -f /tmp/.vault_pass
         
     - name: Generate deployment summary
       run: |

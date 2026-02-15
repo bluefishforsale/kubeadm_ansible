@@ -52,21 +52,30 @@ jobs:
       with:
         ssh-private-key: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
         
-    - name: Configure Ansible vault password
-      run: |
-        echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > .vault_password
-        chmod 600 .vault_password
-        export ANSIBLE_VAULT_PASSWORD_FILE=.vault_password
-        
     - name: Verify connectivity to hosts
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
-        ansible all -i inventories/production/hosts.ini -m ping --vault-password-file=.vault_password
+        # Create temporary vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
+        
+        ansible all -i inventories/production/hosts.ini -m ping --vault-password-file=/tmp/.vault_pass
         
     - name: Run pre-deployment health check
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
+        # Create temporary vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
+        
         # Check cluster health before deployment
         ansible k8s_controller[0] -i inventories/production/hosts.ini -m shell \
-          -a "curl -s -k https://192.168.1.99:6443/healthz" --vault-password-file=.vault_password
+          -a "curl -s -k https://192.168.1.99:6443/healthz" --vault-password-file=/tmp/.vault_pass
+          
+        # Clean up
+        rm -f /tmp/.vault_pass
           
     - name: Determine playbook to run
       id: playbook
@@ -87,30 +96,54 @@ jobs:
         
     - name: Run Ansible deployment (dry run)
       if: steps.playbook.outputs.dry_run == 'true'
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
+        # Create temporary vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
+        
         ansible-playbook ${{ steps.playbook.outputs.playbook }} \
           -i inventories/production/hosts.ini \
           --limit ${{ steps.playbook.outputs.target_hosts }} \
-          --vault-password-file=.vault_password \
+          --vault-password-file=/tmp/.vault_pass \
           --check --diff
+          
+        # Clean up
+        rm -f /tmp/.vault_pass
           
     - name: Run Ansible deployment (live)
       if: steps.playbook.outputs.dry_run == 'false'
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
+        # Create temporary vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
+        
         ansible-playbook ${{ steps.playbook.outputs.playbook }} \
           -i inventories/production/hosts.ini \
           --limit ${{ steps.playbook.outputs.target_hosts }} \
-          --vault-password-file=.vault_password \
+          --vault-password-file=/tmp/.vault_pass \
           --diff
+          
+        # Clean up
+        rm -f /tmp/.vault_pass
           
     - name: Post-deployment verification
       if: success()
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
         echo "🔍 Running post-deployment verification..."
         
+        # Create temporary vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
+        
         # Check cluster health
         ansible k8s_controller[0] -i inventories/production/hosts.ini -m shell \
-          -a "curl -s -k https://192.168.1.99:6443/healthz" --vault-password-file=.vault_password
+          -a "curl -s -k https://192.168.1.99:6443/healthz" --vault-password-file=/tmp/.vault_pass
           
         # If monitoring playbook was run, verify metrics
         if [[ "${{ steps.playbook.outputs.playbook }}" == *"monitoring"* ]]; then
@@ -119,18 +152,16 @@ jobs:
           # Check kube-state-metrics
           ansible k8s_controller[0] -i inventories/production/hosts.ini -m shell \
             -a "kubectl get pods -n kube-system -l app.kubernetes.io/name=kube-state-metrics" \
-            --vault-password-file=.vault_password || true
+            --vault-password-file=/tmp/.vault_pass || true
             
           # Check cAdvisor on nodes
           ansible k8s -i inventories/production/hosts.ini -m shell \
             -a "systemctl is-active cadvisor" \
-            --vault-password-file=.vault_password || true
+            --vault-password-file=/tmp/.vault_pass || true
         fi
         
-    - name: Clean up sensitive files
-      if: always()
-      run: |
-        rm -f .vault_password
+        # Clean up
+        rm -f /tmp/.vault_pass
         
     - name: Create deployment summary
       if: always()
