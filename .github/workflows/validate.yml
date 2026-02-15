@@ -49,11 +49,15 @@ jobs:
       env:
         ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
-        # Create temporary vault password file
+        # Create temporary vault password file for production inventory test
         echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
         chmod 600 /tmp/.vault_pass
         
+        # Test production inventory (may have vault vars)
         ansible-inventory --list -i inventories/production/hosts.ini --vault-password-file=/tmp/.vault_pass > /dev/null
+        
+        # Test CI inventory (no vault needed)
+        ansible-inventory --list -i .github/ci_inventory.ini > /dev/null
         
         # Clean up
         rm -f /tmp/.vault_pass
@@ -66,7 +70,7 @@ jobs:
         echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
         chmod 600 /tmp/.vault_pass
         
-        ansible-playbook site.yml --syntax-check --vault-password-file=/tmp/.vault_pass
+        ansible-playbook site.yml --syntax-check --vault-password-file=/tmp/.vault_pass -i .github/ci_inventory.ini
         
         # Clean up
         rm -f /tmp/.vault_pass
@@ -80,7 +84,7 @@ jobs:
         echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
         chmod 600 /tmp/.vault_pass
         
-        ansible-playbook k8s-health-monitoring/playbooks/deploy-monitoring.yml --syntax-check --vault-password-file=/tmp/.vault_pass
+        ansible-playbook k8s-health-monitoring/playbooks/deploy-monitoring.yml --syntax-check --vault-password-file=/tmp/.vault_pass -i .github/ci_inventory.ini
         
         # Clean up
         rm -f /tmp/.vault_pass
@@ -243,7 +247,7 @@ jobs:
         echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
         chmod 600 /tmp/.vault_pass
         
-        ansible-playbook site.yml -i inventories/test/hosts.ini --check --diff --vault-password-file=/tmp/.vault_pass || true
+        ansible-playbook site.yml -i .github/ci_inventory.ini --check --diff --vault-password-file=/tmp/.vault_pass || true
         
         # Clean up
         rm -f /tmp/.vault_pass
@@ -257,7 +261,7 @@ jobs:
         echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
         chmod 600 /tmp/.vault_pass
         
-        ansible-playbook k8s-health-monitoring/playbooks/deploy-monitoring.yml -i inventories/test/hosts.ini --check --diff --vault-password-file=/tmp/.vault_pass || true
+        ansible-playbook k8s-health-monitoring/playbooks/deploy-monitoring.yml -i .github/ci_inventory.ini --check --diff --vault-password-file=/tmp/.vault_pass || true
         
         # Clean up
         rm -f /tmp/.vault_pass
