@@ -1,0 +1,60 @@
+name: Debug Ansible Environment
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    name: Debug Ansible Setup
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install ansible with verbose output
+      run: |
+        pip install ansible-core
+        echo "Ansible installed, checking version:"
+        ansible --version
+        
+    - name: Check ansible-inventory command exists
+      run: |
+        which ansible-inventory
+        ansible-inventory --help | head -10
+        
+    - name: Test ansible-inventory with absolute minimal case
+      run: |
+        echo "Creating simplest inventory:"
+        echo "[all]" > /tmp/simple.ini
+        echo "localhost" >> /tmp/simple.ini
+        
+        echo "Content:"
+        cat /tmp/simple.ini
+        
+        echo "Testing with verbose output:"
+        ansible-inventory --list -i /tmp/simple.ini -v || echo "Failed with exit code: $?"
+        
+    - name: Check if issue is with environment
+      run: |
+        echo "Environment check:"
+        env | grep -i ansible || echo "No ANSIBLE env vars"
+        echo "Python path:"
+        python3 -c "import sys; print(sys.path)"
+        
+    - name: Try alternative ansible-inventory syntax
+      run: |
+        echo "Trying different approaches:"
+        
+        echo "1. With localhost connection explicit:"
+        echo "[all]" > /tmp/test1.ini  
+        echo "localhost ansible_connection=local" >> /tmp/test1.ini
+        ansible-inventory --list -i /tmp/test1.ini || echo "Test1 failed"
+        
+        echo "2. With just hostname:"
+        echo "[all]" > /tmp/test2.ini
+        echo "testhost" >> /tmp/test2.ini  
+        ansible-inventory --list -i /tmp/test2.ini || echo "Test2 failed"
+        
+        echo "3. Direct ansible command instead:"
+        ansible all -i "localhost," --list-hosts || echo "Direct ansible failed"
