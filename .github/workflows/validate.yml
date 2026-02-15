@@ -45,46 +45,68 @@ jobs:
         fi
         
     - name: Validate inventory syntax
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
-        # Test CI inventory (no vault needed) - this is sufficient for PR validation
+        # Create vault password file from repo secret
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
+        
+        # Test production inventory with vault
+        echo "Testing production inventory..."
+        ansible-inventory --list -i inventories/production/hosts.ini --vault-password-file=/tmp/.vault_pass > /dev/null
+        echo "✅ Production inventory syntax valid"
+        
+        # Test CI inventory (no vault needed)
         echo "Testing CI inventory..."
         ansible-inventory --list -i .github/ci_inventory.ini > /dev/null
         echo "✅ CI inventory syntax valid"
         
+        rm -f /tmp/.vault_pass
+        
     - name: Ansible syntax check - main playbook
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
-        # Create temporary CI vars directory to override vault-encrypted vars
-        mkdir -p /tmp/ci_vars
-        cp .github/ci_group_vars.yml /tmp/ci_vars/all.yml
+        # Create vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
         
-        # Syntax check using CI inventory and mock vars (no vault needed)
-        ansible-playbook site.yml --syntax-check -i .github/ci_inventory.ini -e "@/tmp/ci_vars/all.yml"
+        # Syntax check with vault support
+        ansible-playbook site.yml --syntax-check -i .github/ci_inventory.ini --vault-password-file=/tmp/.vault_pass
         
-        # Clean up
-        rm -rf /tmp/ci_vars
+        rm -f /tmp/.vault_pass
         
     - name: Ansible syntax check - individual playbooks
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
-        # Create temporary CI vars directory
-        mkdir -p /tmp/ci_vars
-        cp .github/ci_group_vars.yml /tmp/ci_vars/all.yml
+        # Create vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
         
         # Check any individual playbooks that exist
         for playbook in playbooks/*.yml playbooks/*.yaml; do
           if [ -f "$playbook" ]; then
             echo "Checking $playbook"
-            ansible-playbook "$playbook" --syntax-check -i .github/ci_inventory.ini -e "@/tmp/ci_vars/all.yml"
+            ansible-playbook "$playbook" --syntax-check -i .github/ci_inventory.ini --vault-password-file=/tmp/.vault_pass
           fi
         done
         
-        # Clean up
-        rm -rf /tmp/ci_vars
+        rm -f /tmp/.vault_pass
         
     - name: Ansible-lint validation
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
+        # Create vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
+        
         ansible-lint --version
-        # Run ansible-lint without vault (uses CI vars for variable resolution)
-        ansible-lint site.yml || true  # Don't fail on warnings initially
+        ansible-lint site.yml --vault-password-file=/tmp/.vault_pass || true  # Don't fail on warnings initially
+        
+        rm -f /tmp/.vault_pass
         
     - name: YAML lint validation
       run: |
@@ -222,33 +244,35 @@ jobs:
         EOF
         
     - name: Dry run - main playbook
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
-        # Create temporary CI vars directory
-        mkdir -p /tmp/ci_vars
-        cp .github/ci_group_vars.yml /tmp/ci_vars/all.yml
+        # Create vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
         
-        # Dry run using CI inventory and mock vars (no vault needed)
-        ansible-playbook site.yml -i .github/ci_inventory.ini --check --diff -e "@/tmp/ci_vars/all.yml" || true
+        # Dry run with vault support
+        ansible-playbook site.yml -i .github/ci_inventory.ini --check --diff --vault-password-file=/tmp/.vault_pass || true
         
-        # Clean up
-        rm -rf /tmp/ci_vars
+        rm -f /tmp/.vault_pass
         
     - name: Dry run - individual playbooks
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
-        # Create temporary CI vars directory
-        mkdir -p /tmp/ci_vars
-        cp .github/ci_group_vars.yml /tmp/ci_vars/all.yml
+        # Create vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
         
         # Dry run any individual playbooks that exist
         for playbook in playbooks/*.yml playbooks/*.yaml; do
           if [ -f "$playbook" ]; then
             echo "Dry run: $playbook"
-            ansible-playbook "$playbook" -i .github/ci_inventory.ini --check --diff -e "@/tmp/ci_vars/all.yml" || true
+            ansible-playbook "$playbook" -i .github/ci_inventory.ini --check --diff --vault-password-file=/tmp/.vault_pass || true
           fi
         done
         
-        # Clean up
-        rm -rf /tmp/ci_vars
+        rm -f /tmp/.vault_pass
         
     - name: Generate deployment summary
       run: |
