@@ -1,6 +1,6 @@
 ---
 - name: Enable non-local IP binding for HAProxy VIP
-  sysctl:
+  ansible.posix.sysctl:
     name: net.ipv4.ip_nonlocal_bind
     value: '1'
     state: present
