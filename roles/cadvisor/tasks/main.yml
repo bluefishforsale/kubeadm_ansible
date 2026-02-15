@@ -1,0 +1,120 @@
+---
+- name: Create cAdvisor namespace
+  kubernetes.core.k8s:
+    kubeconfig: /etc/kubernetes/admin.conf
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: monitoring
+
+- name: Deploy cAdvisor DaemonSet
+  kubernetes.core.k8s:
+    kubeconfig: /etc/kubernetes/admin.conf
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: DaemonSet
+      metadata:
+        name: cadvisor
+        namespace: monitoring
+        labels:
+          app: cadvisor
+      spec:
+        selector:
+          matchLabels:
+            app: cadvisor
+        template:
+          metadata:
+            labels:
+              app: cadvisor
+          spec:
+            hostNetwork: true
+            hostPID: true
+            containers:
+            - name: cadvisor
+              image: gcr.io/cadvisor/cadvisor:v0.47.2
+              ports:
+              - name: http
+                containerPort: 8080
+                protocol: TCP
+              volumeMounts:
+              - name: rootfs
+                mountPath: /rootfs
+                readOnly: true
+              - name: var-run
+                mountPath: /var/run
+                readOnly: false
+              - name: sys
+                mountPath: /sys
+                readOnly: true
+              - name: docker
+                mountPath: /var/lib/docker
+                readOnly: true
+              - name: disk
+                mountPath: /dev/disk
+                readOnly: true
+              resources:
+                requests:
+                  memory: 200Mi
+                  cpu: 200m
+                limits:
+                  memory: 500Mi
+                  cpu: 500m
+              securityContext:
+                privileged: true
+            volumes:
+            - name: rootfs
+              hostPath:
+                path: /
+            - name: var-run
+              hostPath:
+                path: /var/run
+            - name: sys
+              hostPath:
+                path: /sys
+            - name: docker
+              hostPath:
+                path: /var/lib/docker
+            - name: disk
+              hostPath:
+                path: /dev/disk
+
+- name: Create cAdvisor Service for Prometheus scraping
+  kubernetes.core.k8s:
+    kubeconfig: /etc/kubernetes/admin.conf
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: cadvisor
+        namespace: monitoring
+        labels:
+          app: cadvisor
+      spec:
+        type: ClusterIP
+        clusterIP: None  # Headless service for DaemonSet
+        ports:
+        - name: http
+          port: 8080
+          protocol: TCP
+        selector:
+          app: cadvisor
+
+- name: Wait for cAdvisor pods to be ready
+  kubernetes.core.k8s_info:
+    kubeconfig: /etc/kubernetes/admin.conf
+    kind: Pod
+    namespace: monitoring
+    label_selectors:
+      - app=cadvisor
+  register: cadvisor_pods
+  until: cadvisor_pods.resources | selectattr('status.phase', 'equalto', 'Running') | list | length == cadvisor_pods.resources | length
+  retries: 30
+  delay: 10
+
+- name: Display cAdvisor deployment status
+  ansible.builtin.debug:
+    msg: "cAdvisor deployed successfully on {{ cadvisor_pods.resources | length }} nodes"

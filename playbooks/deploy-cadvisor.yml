@@ -1,0 +1,12 @@
+---
+- name: Deploy cAdvisor for container metrics
+  hosts: master
+  become: true
+  gather_facts: false
+  tags: [monitoring, cadvisor]
+  
+  tasks:
+    - name: Include cAdvisor role
+      ansible.builtin.include_role:
+        name: cadvisor
+      run_once: true  # Only need to deploy once to the cluster
