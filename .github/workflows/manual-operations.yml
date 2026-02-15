@@ -38,7 +38,7 @@ on:
 jobs:
   manual-operation:
     name: Execute Manual Operation
-    runs-on: self-hosted
+    runs-on: self-hosted  # Uses existing homelab runner infrastructure
     environment: production
     
     steps:

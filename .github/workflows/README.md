@@ -57,31 +57,17 @@ DISCORD_WEBHOOK=<your-discord-webhook-url>
 
 ### 2. Self-Hosted Runner Setup
 
-The deployment workflows require a self-hosted GitHub runner with:
+**✅ USES EXISTING HOMELAB RUNNER INFRASTRUCTURE**
 
-**Network Access:**
-- Access to homelab network (192.168.1.0/24)
-- SSH connectivity to all target hosts
-- Internet access for GitHub API
+The deployment workflows leverage your existing GitHub Actions runners from the [homelab repository](https://github.com/bluefishforsale/homelab/actions).
 
-**Software Requirements:**
-- Ubuntu 20.04+ (recommended)
-- Python 3.11+
-- Git
-- Network connectivity to infrastructure
+**Requirements met by existing runners:**
+- ✅ Access to homelab network (192.168.1.0/24)
+- ✅ SSH connectivity to all target hosts  
+- ✅ Python 3.11+ and required dependencies
+- ✅ Network connectivity to infrastructure
 
-**Installation:**
-```bash
-# On your runner host (could be node005 or dedicated VM)
-curl -o actions-runner-linux-x64-2.311.0.tar.gz -L https://github.com/actions/runner/releases/download/v2.311.0/actions-runner-linux-x64-2.311.0.tar.gz
-tar xzf ./actions-runner-linux-x64-2.311.0.tar.gz
-./config.sh --url https://github.com/bluefishforsale/kubeadm_ansible --token YOUR_TOKEN
-./run.sh
-
-# To run as a service:
-sudo ./svc.sh install
-sudo ./svc.sh start
-```
+**No additional runner setup required!** The workflows will use the same self-hosted runners that are already configured for your homelab automation.
 
 ### 3. Repository Environment Setup
 

@@ -30,8 +30,7 @@ on:
 jobs:
   deploy:
     name: Deploy to Infrastructure
-    runs-on: self-hosted  # Requires runner with access to homelab network
-    # Alternative: runs-on: ubuntu-latest (if using VPN/bastion)
+    runs-on: self-hosted  # Uses existing homelab runner infrastructure
     
     environment: production  # Requires manual approval for production
     

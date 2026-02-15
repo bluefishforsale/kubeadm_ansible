@@ -147,14 +147,11 @@ This repository now includes automated GitOps workflows for infrastructure manag
 bash setup-gitops.sh
 ```
 
-**2. Set up GitHub runner:**
+**2. Leverage existing runner infrastructure:**
 ```bash
-# On your management host (node005 or dedicated VM)
-mkdir -p ~/actions-runner && cd ~/actions-runner
-curl -o actions-runner-linux-x64.tar.gz -L https://github.com/actions/runner/releases/latest/download/actions-runner-linux-x64.tar.gz
-tar xzf ./actions-runner-linux-x64.tar.gz
-./config.sh --url https://github.com/bluefishforsale/kubeadm_ansible --token YOUR_TOKEN
-sudo ./svc.sh install && sudo ./svc.sh start
+# ✅ Uses existing homelab runners - no setup required!
+# Workflows automatically use self-hosted runners from:
+# https://github.com/bluefishforsale/homelab/actions
 ```
 
 **3. Configure GitHub secrets:**
