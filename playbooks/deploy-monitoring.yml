@@ -1,0 +1,173 @@
+---
+# Kubernetes Health Manager - Complete Monitoring Deployment
+- name: Deploy Kubernetes Monitoring Stack
+  hosts: k8s_controller[0]  # Run on first control node
+  become: yes
+  vars:
+    ansible_ssh_user: debian
+    
+  tasks:
+    - name: Create monitoring namespace if it doesn't exist
+      kubernetes.core.k8s:
+        name: kube-system
+        api_version: v1
+        kind: Namespace
+        state: present
+      delegate_to: "{{ inventory_hostname }}"
+      run_once: true
+
+    - name: Deploy kube-state-metrics
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('file', '../monitoring/kube-state-metrics.yaml') | from_yaml_all | list }}"
+      delegate_to: "{{ inventory_hostname }}"
+      run_once: true
+      register: kube_state_metrics_result
+
+    - name: Wait for kube-state-metrics to be ready
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: kube-state-metrics
+        namespace: kube-system
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 300
+      delegate_to: "{{ inventory_hostname }}"
+      run_once: true
+
+    - name: Create monitoring configuration directory
+      file:
+        path: /opt/k8s-monitoring
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Copy health check script
+      copy:
+        src: ../scripts/health-check.sh
+        dest: /opt/k8s-monitoring/health-check.sh
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Create health check service for systemd
+      copy:
+        dest: /etc/systemd/system/k8s-health-check.service
+        content: |
+          [Unit]
+          Description=Kubernetes Health Check
+          After=network.target
+          
+          [Service]
+          Type=oneshot
+          ExecStart=/opt/k8s-monitoring/health-check.sh
+          User=root
+          
+          [Install]
+          WantedBy=multi-user.target
+        owner: root
+        group: root
+        mode: '0644'
+      notify: reload systemd
+
+    - name: Create health check timer for systemd
+      copy:
+        dest: /etc/systemd/system/k8s-health-check.timer
+        content: |
+          [Unit]
+          Description=Run Kubernetes Health Check every 30 minutes
+          Requires=k8s-health-check.service
+          
+          [Timer]
+          OnCalendar=*:0/30
+          Persistent=true
+          
+          [Install]
+          WantedBy=timers.target
+        owner: root
+        group: root
+        mode: '0644'
+      notify: reload systemd
+
+  handlers:
+    - name: reload systemd
+      systemd:
+        daemon_reload: yes
+
+# Fix cAdvisor on all nodes
+- name: Fix cAdvisor on Kubernetes nodes
+  hosts: k8s
+  become: yes
+  vars:
+    ansible_ssh_user: debian
+    
+  tasks:
+    - name: Check if cAdvisor is already running
+      systemd:
+        name: cadvisor
+        state: started
+      register: cadvisor_status
+      failed_when: false
+
+    - name: Install cAdvisor if not present
+      block:
+        - name: Download cAdvisor binary
+          get_url:
+            url: "https://github.com/google/cadvisor/releases/download/v0.49.1/cadvisor-v0.49.1-linux-amd64"
+            dest: /usr/local/bin/cadvisor
+            mode: '0755'
+            owner: root
+            group: root
+          
+        - name: Create cAdvisor systemd service
+          copy:
+            dest: /etc/systemd/system/cadvisor.service
+            content: |
+              [Unit]
+              Description=cAdvisor
+              After=network.target
+              
+              [Service]
+              Type=simple
+              ExecStart=/usr/local/bin/cadvisor \
+                --listen_ip="0.0.0.0" \
+                --port=8080 \
+                --housekeeping_interval=30s \
+                --max_housekeeping_interval=35s \
+                --event_storage_event_limit=default=0 \
+                --event_storage_age_limit=default=0 \
+                --disable_metrics=accelerator,cpu_topology,disk,memory_numa,tcp,udp,percpu,sched,process,hugetlb,referenced_memory,resctrl,cpuset,advtcp,memory_numa \
+                --docker_only \
+                --store_container_labels=false
+              Restart=always
+              RestartSec=10
+              
+              [Install]
+              WantedBy=multi-user.target
+            owner: root
+            group: root
+            mode: '0644'
+          notify: reload systemd and start cadvisor
+          
+      when: cadvisor_status.status.ActiveState != "active"
+
+    - name: Ensure cAdvisor is running and enabled
+      systemd:
+        name: cadvisor
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+  handlers:
+    - name: reload systemd and start cadvisor
+      block:
+        - systemd:
+            daemon_reload: yes
+        - systemd:
+            name: cadvisor
+            state: restarted
+            enabled: yes
