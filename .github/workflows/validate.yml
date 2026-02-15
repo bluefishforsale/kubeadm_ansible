@@ -11,8 +11,9 @@ on:
 
 jobs:
   ansible-lint:
-    name: Ansible Syntax & Lint
+    name: Ansible Syntax & Lint  
     runs-on: ubuntu-latest
+    environment: Github Actions CI
     
     steps:
     - name: Checkout code
@@ -45,8 +46,17 @@ jobs:
         fi
         
     - name: Validate inventory syntax
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
-        ansible-inventory --list -i inventories/production/hosts.ini > /dev/null
+        # Create temporary vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
+        
+        ansible-inventory --list -i inventories/production/hosts.ini --vault-password-file=/tmp/.vault_pass > /dev/null
+        
+        # Clean up
+        rm -f /tmp/.vault_pass
         
     - name: Ansible syntax check - main playbook
       env:
@@ -76,9 +86,18 @@ jobs:
         rm -f /tmp/.vault_pass
         
     - name: Ansible-lint validation
+      env:
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
+        # Create temporary vault password file
+        echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
+        chmod 600 /tmp/.vault_pass
+        
         ansible-lint --version
-        ansible-lint site.yml || true  # Don't fail on warnings initially
+        ansible-lint site.yml --vault-password-file=/tmp/.vault_pass || true  # Don't fail on warnings initially
+        
+        # Clean up
+        rm -f /tmp/.vault_pass
         
     - name: YAML lint validation
       run: |
@@ -140,10 +159,50 @@ jobs:
         
         echo "✅ Security scan complete"
 
+  check-vault:
+    name: Verify Vault Files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check vault encryption
+        run: |
+          echo "Checking vault files are encrypted..."
+          
+          # Check group_vars vault files
+          for vault in group_vars/all/vault.yml; do
+            if [ -f "$vault" ]; then
+              if ! head -n 1 "$vault" | grep -q "ANSIBLE_VAULT"; then
+                echo "ERROR: $vault is not encrypted!"
+                exit 1
+              else
+                echo "✅ $vault is encrypted"
+              fi
+            else
+              echo "ℹ️  $vault not found"
+            fi
+          done
+          
+          # Check any other vault files
+          find . -name "*vault*.yml" -o -name "*vault*.yaml" | while read vaultfile; do
+            if [ "$vaultfile" != "./group_vars/all/vault.yml" ]; then
+              if ! head -n 1 "$vaultfile" | grep -q "ANSIBLE_VAULT"; then
+                echo "ERROR: $vaultfile is not encrypted!"
+                exit 1
+              else
+                echo "✅ $vaultfile is encrypted"
+              fi
+            fi
+          done
+          
+          echo "✅ All vault files are properly encrypted"
+
   dry-run-test:
     name: Dry Run Test
     runs-on: ubuntu-latest
-    needs: [ansible-lint, kubernetes-manifests]
+    environment: Github Actions CI
+    needs: [ansible-lint, kubernetes-manifests, check-vault]
     
     steps:
     - name: Checkout code
