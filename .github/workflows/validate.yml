@@ -28,6 +28,10 @@ jobs:
         pip install ansible-core ansible-lint yamllint
         pip install kubernetes PyYAML
         
+    - name: Install Ansible collections
+      run: |
+        ansible-galaxy collection install community.general kubernetes.core
+        
     - name: Create ansible.cfg if missing
       run: |
         if [ ! -f ansible.cfg ]; then
@@ -224,6 +228,10 @@ jobs:
     - name: Install Ansible
       run: |
         pip install ansible-core kubernetes PyYAML
+        
+    - name: Install Ansible collections
+      run: |
+        ansible-galaxy collection install community.general kubernetes.core
         
     - name: Create mock inventory for dry run
       run: |
