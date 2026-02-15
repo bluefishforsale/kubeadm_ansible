@@ -1,0 +1,28 @@
+---
+# cluster_health_reporter role defaults
+
+# Prometheus configuration
+prometheus_url: "http://192.168.1.143:9090"
+
+# Discord webhook for notifications
+discord_webhook_url: ""  # Set via vault or environment
+
+# Report storage
+report_storage_path: "/var/lib/cluster-health-reports"
+
+# Daily report schedule (cron format)
+daily_report_hour: "8"
+daily_report_minute: "0"
+
+# Weekly report schedule (cron format) - Monday 9am
+weekly_report_day: "1"
+weekly_report_hour: "9"
+weekly_report_minute: "0"
+
+# Health thresholds
+cpu_warning_threshold: 80
+memory_warning_threshold: 85
+disk_warning_threshold: 90
+
+# Report retention (days)
+report_retention_days: 90

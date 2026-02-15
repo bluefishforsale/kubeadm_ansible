@@ -1,0 +1,89 @@
+---
+- name: Install Python dependencies
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-requests
+    state: present
+    update_cache: yes
+
+- name: Create report storage directory
+  ansible.builtin.file:
+    path: "{{ report_storage_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install health report generator script
+  ansible.builtin.copy:
+    src: generate_health_report.py
+    dest: /usr/local/bin/generate_health_report.py
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Create daily health report cron job
+  ansible.builtin.cron:
+    name: "Kubernetes cluster daily health report"
+    minute: "{{ daily_report_minute }}"
+    hour: "{{ daily_report_hour }}"
+    job: "/usr/local/bin/generate_health_report.py --type daily --prometheus-url {{ prometheus_url }} --output {{ report_storage_path }}/daily-$(date +\\%Y-\\%m-\\%d).txt --discord-webhook '{{ discord_webhook_url }}' >> /var/log/cluster-health-reports.log 2>&1"
+    user: root
+    state: present
+
+- name: Create weekly health report cron job
+  ansible.builtin.cron:
+    name: "Kubernetes cluster weekly health report"
+    minute: "{{ weekly_report_minute }}"
+    hour: "{{ weekly_report_hour }}"
+    weekday: "{{ weekly_report_day }}"
+    job: "/usr/local/bin/generate_health_report.py --type weekly --prometheus-url {{ prometheus_url }} --output {{ report_storage_path }}/weekly-$(date +\\%Y-\\%m-\\%d).txt --discord-webhook '{{ discord_webhook_url }}' >> /var/log/cluster-health-reports.log 2>&1"
+    user: root
+    state: present
+
+- name: Create report cleanup cron job
+  ansible.builtin.cron:
+    name: "Clean up old health reports"
+    minute: "0"
+    hour: "2"
+    job: "find {{ report_storage_path }} -name '*.txt' -mtime +{{ report_retention_days }} -delete"
+    user: root
+    state: present
+
+- name: Create log rotation config
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/cluster-health-reports
+    content: |
+      /var/log/cluster-health-reports.log {
+          weekly
+          rotate 4
+          compress
+          missingok
+          notifempty
+      }
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Run initial daily report to verify setup
+  ansible.builtin.command: >
+    /usr/local/bin/generate_health_report.py
+    --type daily
+    --prometheus-url {{ prometheus_url }}
+    --output {{ report_storage_path }}/test-report-{{ ansible_date_time.iso8601_basic_short }}.txt
+  register: initial_report
+  changed_when: false
+  failed_when: initial_report.rc != 0
+
+- name: Display setup summary
+  ansible.builtin.debug:
+    msg: |
+      ========================================
+      Cluster Health Reporting Configured
+      ========================================
+      Daily reports: {{ daily_report_hour }}:{{ daily_report_minute }}
+      Weekly reports: Mondays {{ weekly_report_hour }}:{{ weekly_report_minute }}
+      Report storage: {{ report_storage_path }}
+      Discord notifications: {{ 'Enabled' if discord_webhook_url else 'Disabled' }}
+      ========================================

@@ -1,0 +1,23 @@
+---
+- name: Setup automated cluster health reporting
+  hosts: master
+  become: true
+  gather_facts: true
+  tags: [monitoring, health-reporting]
+  
+  roles:
+    - cluster_health_reporter
+  
+  post_tasks:
+    - name: Display next report schedule
+      ansible.builtin.debug:
+        msg: |
+          Automated health reporting is now active!
+          
+          Next daily report: Today at {{ hostvars[inventory_hostname].daily_report_hour }}:{{ hostvars[inventory_hostname].daily_report_minute }}
+          Next weekly report: Monday at {{ hostvars[inventory_hostname].weekly_report_hour }}:{{ hostvars[inventory_hostname].weekly_report_minute }}
+          
+          View reports: {{ hostvars[inventory_hostname].report_storage_path }}
+          
+          To run a report manually:
+          /usr/local/bin/generate_health_report.py --type daily --prometheus-url {{ hostvars[inventory_hostname].prometheus_url }} --output /tmp/test-report.txt
