@@ -70,10 +70,14 @@ jobs:
         echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
         chmod 600 /tmp/.vault_pass
         
-        ansible-playbook site.yml --syntax-check --vault-password-file=/tmp/.vault_pass -i .github/ci_inventory.ini
+        # Create temporary CI vars directory
+        mkdir -p /tmp/ci_vars
+        cp .github/ci_group_vars.yml /tmp/ci_vars/all.yml
+        
+        ansible-playbook site.yml --syntax-check --vault-password-file=/tmp/.vault_pass -i .github/ci_inventory.ini -e "@/tmp/ci_vars/all.yml"
         
         # Clean up
-        rm -f /tmp/.vault_pass
+        rm -rf /tmp/.vault_pass /tmp/ci_vars
         
     - name: Ansible syntax check - monitoring playbook
       if: hashFiles('k8s-health-monitoring/playbooks/deploy-monitoring.yml') != ''
@@ -84,10 +88,14 @@ jobs:
         echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
         chmod 600 /tmp/.vault_pass
         
-        ansible-playbook k8s-health-monitoring/playbooks/deploy-monitoring.yml --syntax-check --vault-password-file=/tmp/.vault_pass -i .github/ci_inventory.ini
+        # Create temporary CI vars directory
+        mkdir -p /tmp/ci_vars
+        cp .github/ci_group_vars.yml /tmp/ci_vars/all.yml
+        
+        ansible-playbook k8s-health-monitoring/playbooks/deploy-monitoring.yml --syntax-check --vault-password-file=/tmp/.vault_pass -i .github/ci_inventory.ini -e "@/tmp/ci_vars/all.yml"
         
         # Clean up
-        rm -f /tmp/.vault_pass
+        rm -rf /tmp/.vault_pass /tmp/ci_vars
         
     - name: Ansible-lint validation
       env:
@@ -247,10 +255,14 @@ jobs:
         echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
         chmod 600 /tmp/.vault_pass
         
-        ansible-playbook site.yml -i .github/ci_inventory.ini --check --diff --vault-password-file=/tmp/.vault_pass || true
+        # Create temporary CI vars directory
+        mkdir -p /tmp/ci_vars
+        cp .github/ci_group_vars.yml /tmp/ci_vars/all.yml
+        
+        ansible-playbook site.yml -i .github/ci_inventory.ini --check --diff --vault-password-file=/tmp/.vault_pass -e "@/tmp/ci_vars/all.yml" || true
         
         # Clean up
-        rm -f /tmp/.vault_pass
+        rm -rf /tmp/.vault_pass /tmp/ci_vars
         
     - name: Dry run - monitoring playbook
       if: hashFiles('k8s-health-monitoring/playbooks/deploy-monitoring.yml') != ''
@@ -261,10 +273,14 @@ jobs:
         echo "$ANSIBLE_VAULT_PASSWORD" > /tmp/.vault_pass
         chmod 600 /tmp/.vault_pass
         
-        ansible-playbook k8s-health-monitoring/playbooks/deploy-monitoring.yml -i .github/ci_inventory.ini --check --diff --vault-password-file=/tmp/.vault_pass || true
+        # Create temporary CI vars directory
+        mkdir -p /tmp/ci_vars
+        cp .github/ci_group_vars.yml /tmp/ci_vars/all.yml
+        
+        ansible-playbook k8s-health-monitoring/playbooks/deploy-monitoring.yml -i .github/ci_inventory.ini --check --diff --vault-password-file=/tmp/.vault_pass -e "@/tmp/ci_vars/all.yml" || true
         
         # Clean up
-        rm -f /tmp/.vault_pass
+        rm -rf /tmp/.vault_pass /tmp/ci_vars
         
     - name: Generate deployment summary
       run: |
